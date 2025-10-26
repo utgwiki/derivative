@@ -1,7 +1,7 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
 const {
     MAIN_KEYS
-} = require("../geminikey.js");
+} = require("./geminikey.js");
 
 require("dotenv").config();
 const {
