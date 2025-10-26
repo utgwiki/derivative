@@ -1,2 +1,2 @@
-# derivative
-wiki-bot with added image understanding functionality
+# shitheads
+these bots are epic...
