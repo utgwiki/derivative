@@ -321,7 +321,6 @@ function parseWikiLinks(text) {
 }
 
 async function parseTemplates(text) {
-    console.log("parseTemplates called for text:", text);
     const templateRegex = /\{\{([^{}]+)\}\}/g;
     let match;
 
@@ -366,6 +365,7 @@ async function parseTemplates(text) {
         if (templateName.includes("#")) {
             const [pageTitle, section] = templateName.split("#").map(x => x.trim());
             const sectionIndex = await getSectionIndex(pageTitle, section);
+            console.log(`pageTitle is ${pageTitle}, section is ${section}.`);
             if (sectionIndex) {
                 const sectionText = await getSectionContent(pageTitle, sectionIndex);
                 if (sectionText) {
