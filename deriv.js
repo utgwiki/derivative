@@ -92,7 +92,9 @@ async function getAllNamespaces() {
             format: "json"
         });
         const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
+            }
         });
         if (!res.ok) throw new Error(`Namespaces fetch failed: ${res.status}`);
         const json = await res.json();
@@ -104,9 +106,15 @@ async function getAllNamespaces() {
                 const id = parseInt(k, 10);
                 // namespace name is usually in the "*" property; fallback to canonical if present
                 const name = (v && (v["*"] || v.canonical || "")).toString().trim();
-                return { id, name };
+                return {
+                    id,
+                    name
+                };
             })
-            .filter(({ id, name }) => {
+            .filter(({
+                id,
+                name
+            }) => {
                 if (Number.isNaN(id) || id < 0) return false; // skip invalid / negative ids
                 const lower = name.toLowerCase();
                 // Exclude any namespace whose name contains "talk"
@@ -153,7 +161,9 @@ async function getAllPages() {
 
                 const url = `${API}?${params.toString()}`;
                 const res = await fetch(url, {
-                    headers: { "User-Agent": "DiscordBot/Deriv" }
+                    headers: {
+                        "User-Agent": "DiscordBot/Deriv"
+                    }
                 });
                 if (!res.ok) throw new Error(`Failed: ${res.status} ${res.statusText}`);
                 const json = await res.json();
@@ -210,9 +220,9 @@ async function findCanonicalTitle(input) {
     // try titlecasing namespace + words fallback
     if (norm.includes(":")) {
         const parts = norm.split(":").map((seg, i) =>
-            i === 0
-                ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()
-                : seg.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("_")
+            i === 0 ?
+            seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase() :
+            seg.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("_")
         );
         const alt = parts.join(":"); // e.g. "Dev:Outfit_Helper"
         if (pageLookup.has(alt.toLowerCase())) return pageLookup.get(alt.toLowerCase());
@@ -234,7 +244,11 @@ async function findCanonicalTitle(input) {
                 redirects: "1",
                 indexpageids: "1"
             });
-            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+            const res = await fetch(`${API}?${params.toString()}`, {
+                headers: {
+                    "User-Agent": "DiscordBot/Deriv"
+                }
+            });
             if (!res.ok) continue;
             const json = await res.json();
             const pageids = json.query?.pageids || [];
@@ -297,7 +311,9 @@ async function getLeadSection(pageTitle) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
+            }
         });
         const json = await res.json();
         const html = json.parse?.text?.["*"];
@@ -331,12 +347,19 @@ async function parseTemplates(text) {
             prop: "sections",
             page: pageTitle
         });
-        console.log(`Looking for section '${sectionName}' in ${pageTitle} sections:`, sections.map(s => s.line));
-        const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+        
+        const res = await fetch(`${API}?${params}`, {
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
+            }
+        });
         if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
         const json = await res.json();
         const sections = json.parse.sections || [];
-        const found = sections.find(s => 
+
+        console.log(`Looking for section '${sectionName}' in ${pageTitle} sections:`, sections.map(s => s.line));
+        
+        const found = sections.find(s =>
             s.line.trim().toLowerCase().replace(/\s+/g, " ") === sectionName.toLowerCase().replace(/\s+/g, " ")
         );
         return found ? found.index : null;
@@ -351,7 +374,11 @@ async function parseTemplates(text) {
             section: sectionIndex
         });
         console.log(`Finding section ${sectionIndex} in ${pageTitle}...`);
-        const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+        const res = await fetch(`${API}?${params}`, {
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
+            }
+        });
         if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
         const json = await res.json();
         const html = json.parse?.text?.["*"];
@@ -363,7 +390,7 @@ async function parseTemplates(text) {
         let replacement;
 
         console.log("templateName before # check:", templateName);
-        
+
         if (templateName.includes("#")) {
             const [pageTitle, section] = templateName.split("#").map(x => x.trim());
             const sectionIndex = await getSectionIndex(pageTitle, section);
@@ -377,7 +404,7 @@ async function parseTemplates(text) {
             } else replacement = "I don't know.";
         } else {
             console.log("No # in templateName, skipping section branch");
-            
+
             const wikiText = await getLeadSection(templateName);
             if (wikiText) {
                 const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
@@ -826,29 +853,38 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
             }
         }
 
-// === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
-const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
-const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
-if (linkMatches.length) {
-    const resolved = [];
-    for (const m of linkMatches) {
-        const raw = m[1].trim();
-        const canonical = await findCanonicalTitle(raw);
+        // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
+        const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
+        const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
+        if (linkMatches.length) {
+            const resolved = [];
+            for (const m of linkMatches) {
+                const raw = m[1].trim();
+                const canonical = await findCanonicalTitle(raw);
 
-        if (!canonical) {
-            // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
-            const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
-            if (isInteraction(messageOrInteraction)) {
-                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-            } else {
-                await messageOrInteraction.reply(replyOptions);
+                if (!canonical) {
+                    // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
+                    const replyOptions = {
+                        content: "I don't know.",
+                        allowedMentions: {
+                            repliedUser: false
+                        }
+                    };
+                    if (isInteraction(messageOrInteraction)) {
+                        try {
+                            await messageOrInteraction.editReply(replyOptions);
+                        } catch {
+                            await messageOrInteraction.followUp(replyOptions);
+                        }
+                    } else {
+                        await messageOrInteraction.reply(replyOptions);
+                    }
+                    if (typingInterval) clearInterval(typingInterval);
+                    return;
+                }
+
+                resolved.push(canonical);
             }
-            if (typingInterval) clearInterval(typingInterval);
-            return;
-        }
-
-        resolved.push(canonical);
-    }
 
             // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
             const uniqueResolved = [...new Set(resolved)];
@@ -856,17 +892,26 @@ if (linkMatches.length) {
                 const parts = foundTitle.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
                 return `https://tagging.wiki/wiki/${parts.join(':')}`;
             });
-        
-            const replyOptions = { content: urls.join("\n"), allowedMentions: { repliedUser: false } };
+
+            const replyOptions = {
+                content: urls.join("\n"),
+                allowedMentions: {
+                    repliedUser: false
+                }
+            };
             if (isInteraction(messageOrInteraction)) {
-                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
+                try {
+                    await messageOrInteraction.editReply(replyOptions);
+                } catch {
+                    await messageOrInteraction.followUp(replyOptions);
+                }
             } else {
                 await messageOrInteraction.reply(replyOptions);
             }
             if (typingInterval) clearInterval(typingInterval);
             return;
         }
-        
+
         // Detect explicit {{Template}} usage and resolve to canonical page title if present
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
@@ -877,9 +922,18 @@ if (linkMatches.length) {
             const canonical = await findCanonicalTitle(rawTemplate);
             if (!canonical) {
                 // Template doesn't exist → instantly reply "I don't know."
-                const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
+                const replyOptions = {
+                    content: "I don't know.",
+                    allowedMentions: {
+                        repliedUser: false
+                    }
+                };
                 if (messageOrInteraction.editReply) {
-                    try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
+                    try {
+                        await messageOrInteraction.editReply(replyOptions);
+                    } catch {
+                        await messageOrInteraction.followUp(replyOptions);
+                    }
                 } else {
                     await messageOrInteraction.reply(replyOptions);
                 }
@@ -894,7 +948,7 @@ if (linkMatches.length) {
         // ---- page ----
         let pageTitles = [];
         let wikiContent = "";
-        
+
         if (explicitTemplateFoundTitle && explicitTemplateContent) {
             pageTitles = [explicitTemplateFoundTitle];
             wikiContent = `\n\n--- Page: ${explicitTemplateFoundTitle} ---\n${explicitTemplateContent}`;
@@ -919,8 +973,8 @@ if (linkMatches.length) {
             messageOrInteraction // Pass the Discord object for context/history
         );
 
-        let parsedReply = await parseTemplates(reply);  // expand {{ }}
-        parsedReply = parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
+        let parsedReply = await parseTemplates(reply); // expand {{ }}
+        parsedReply = parseWikiLinks(parsedReply); // convert [[ ]] → wiki links
 
         // 5. Prepare Media (Image)
         let imageUrl = null;
@@ -975,12 +1029,12 @@ if (linkMatches.length) {
             if (mainSection.components && mainSection.components.length > 0) {
                 // Filter out any undefined components just in case
                 mainSection.components = mainSection.components.filter(c => c !== undefined);
-            
+
                 if (mainSection.components.length > 0) {
                     container.addSectionComponents(mainSection);
                 }
             }
-            
+
             // Only create button if explicitTemplateFoundTitle is defined
             if (explicitTemplateFoundTitle) {
                 try {
@@ -990,7 +1044,7 @@ if (linkMatches.length) {
                         .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
                         .setStyle(ButtonStyle.Link)
                         .setURL(pageUrl);
-            
+
                     // Only add btn if it's not undefined
                     if (btn) row.addComponents(btn);
                     if (row.components.length > 0) container.addActionRowComponents(row);
@@ -998,7 +1052,7 @@ if (linkMatches.length) {
                     console.warn("Failed to create template link button:", err);
                 }
             }
-            
+
             // Action Row for Buttons
             // if (buttons.length > 0) {
             // const row = new ActionRowBuilder();
@@ -1148,8 +1202,8 @@ client.on("interactionCreate", async (interaction) => {
     const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
 
     const isPrivateChannel = interaction.channel &&
-    (interaction.channel.type === ChannelType.DM ||
-     interaction.channel.type === ChannelType.GroupDM);
+        (interaction.channel.type === ChannelType.DM ||
+            interaction.channel.type === ChannelType.GroupDM);
 
     // Only make response public in DMs
     const ephemeralSetting = !isPrivateChannel;
