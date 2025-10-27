@@ -321,6 +321,7 @@ function parseWikiLinks(text) {
 }
 
 async function parseTemplates(text) {
+    console.log(`Finding section ${sectionIndex} in ${pageTitle}...`);
     const templateRegex = /\{\{([^{}]+)\}\}/g;
     let match;
 
@@ -331,7 +332,7 @@ async function parseTemplates(text) {
             prop: "sections",
             page: pageTitle
         });
-        console.log(`Finding section ${sectionName} in ${pageTitle}...`);
+        console.log(`Looking for section '${sectionName}' in ${pageTitle} sections:`, sections.map(s => s.line));
         const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
         if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
         const json = await res.json();
