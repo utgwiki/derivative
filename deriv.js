@@ -334,8 +334,10 @@ async function parseTemplates(text) {
         const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
         if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
         const json = await res.json();
-        const sections = json.parse?.sections || [];
-        const found = sections.find(s => s.line.toLowerCase() === sectionName.toLowerCase());
+        const sections = json.parse.sections || [];
+        const found = sections.find(s => 
+            s.line.trim().toLowerCase().replace(/\s+/g, " ") === sectionName.toLowerCase().replace(/\s+/g, " ")
+        );
         return found ? found.index : null;
     }
 
