@@ -321,7 +321,7 @@ function parseWikiLinks(text) {
 }
 
 async function parseTemplates(text) {
-    console.log(`Finding section ${sectionIndex} in ${pageTitle}...`);
+    console.log("parseTemplates called for text:", text);
     const templateRegex = /\{\{([^{}]+)\}\}/g;
     let match;
 
