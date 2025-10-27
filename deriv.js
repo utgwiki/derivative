@@ -320,66 +320,60 @@ function parseWikiLinks(text) {
     });
 }
 
-async function getWikiSection(pageTitle, sectionName) {
-    try {
+async function parseTemplates(text) {
+    const templateRegex = /\{\{([^{}]+)\}\}/g;
+    let match;
+
+    async function getSectionIndex(pageTitle, sectionName) {
+        const params = new URLSearchParams({
+            action: "parse",
+            format: "json",
+            prop: "sections",
+            page: pageTitle
+        });
+        const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+        if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
+        const json = await res.json();
+        const sections = json.parse?.sections || [];
+        const found = sections.find(s => s.line.toLowerCase() === sectionName.toLowerCase());
+        return found ? found.index : null;
+    }
+
+    async function getSectionContent(pageTitle, sectionIndex) {
         const params = new URLSearchParams({
             action: "parse",
             format: "json",
             prop: "text",
             page: pageTitle,
-            section: "all"
+            section: sectionIndex
         });
-
         const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
-        if (!res.ok) throw new Error(`Failed to fetch sections: ${res.status}`);
+        if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
         const json = await res.json();
-
-        const sections = json.parse?.sections || [];
-        const section = sections.find(s => s.line.toLowerCase() === sectionName.toLowerCase());
-        if (!section) return null;
-
-        const secParams = new URLSearchParams({
-            action: "parse",
-            format: "json",
-            prop: "text",
-            page: pageTitle,
-            section: section.index
-        });
-        const secRes = await fetch(`${API}?${secParams}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
-        const secJson = await secRes.json();
-        const html = secJson.parse?.text?.["*"];
+        const html = json.parse?.text?.["*"];
         return html ? html.replace(/<[^>]*>?/gm, "") : null;
-    } catch (err) {
-        console.error(`getWikiSection error (${pageTitle}#${sectionName}):`, err.message);
-        return null;
     }
-}
-
-async function parseTemplates(text) {
-    const templateRegex = /\{\{([^{}]+)\}\}/g;
-    let match;
 
     while ((match = templateRegex.exec(text)) !== null) {
         const templateName = match[1].trim();
         let replacement;
 
         if (templateName.includes("#")) {
-            const [page, section] = templateName.split("#");
-            const sectionText = await getWikiSection(page.trim(), section.trim());
-            if (sectionText) {
-                const link = `<https://tagging.wiki/wiki/${encodeURIComponent(page.trim().replace(/ /g, "_"))}>`;
-                replacement = `**${page}#${section}** → ${sectionText.slice(0, 1000)}\n${link}`;
-            } else {
-                replacement = "I don't know.";
-            }
+            const [pageTitle, section] = templateName.split("#").map(x => x.trim());
+            const sectionIndex = await getSectionIndex(pageTitle, section);
+            if (sectionIndex) {
+                const sectionText = await getSectionContent(pageTitle, sectionIndex);
+                if (sectionText) {
+                    const link = `<https://tagging.wiki/wiki/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}>`;
+                    replacement = `**${pageTitle}#${section}** → ${sectionText.slice(0, 1000)}\n${link}`;
+                } else replacement = "I don't know.";
+            } else replacement = "I don't know.";
         } else {
             const wikiText = await getLeadSection(templateName);
             if (wikiText) {
                 const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
                 replacement = `**${templateName}** → ${wikiText.slice(0, 1000)}\n${link}`;
-            } else {
-                replacement = "I don't know.";
-            }
+            } else replacement = "I don't know.";
         }
 
         text = text.replace(match[0], replacement);
