@@ -331,6 +331,7 @@ async function parseTemplates(text) {
             prop: "sections",
             page: pageTitle
         });
+        console.log(`Finding section ${sectionName} in ${pageTitle}...`);
         const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
         if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
         const json = await res.json();
@@ -349,6 +350,7 @@ async function parseTemplates(text) {
             page: pageTitle,
             section: sectionIndex
         });
+        console.log(`Finding section ${sectionIndex} in ${pageTitle}...`);
         const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
         if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
         const json = await res.json();
@@ -366,7 +368,7 @@ async function parseTemplates(text) {
             if (sectionIndex) {
                 const sectionText = await getSectionContent(pageTitle, sectionIndex);
                 if (sectionText) {
-                    const link = `<https://tagging.wiki/wiki/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}>`;
+                    const link = `<https://tagging.wiki/wiki/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}#${encodeURIComponent(section.replace(/ /g, "_"))}>`;
                     replacement = `**${pageTitle}#${section}** → ${sectionText.slice(0, 1000)}\n${link}`;
                 } else replacement = "I don't know.";
             } else replacement = "I don't know.";
