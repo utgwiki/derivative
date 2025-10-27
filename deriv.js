@@ -320,58 +320,72 @@ function parseWikiLinks(text) {
     });
 }
 
+async function getWikiSection(pageTitle, sectionName) {
+    try {
+        const params = new URLSearchParams({
+            action: "parse",
+            format: "json",
+            prop: "text",
+            page: pageTitle,
+            section: "all"
+        });
+
+        const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+        if (!res.ok) throw new Error(`Failed to fetch sections: ${res.status}`);
+        const json = await res.json();
+
+        const sections = json.parse?.sections || [];
+        const section = sections.find(s => s.line.toLowerCase() === sectionName.toLowerCase());
+        if (!section) return null;
+
+        const secParams = new URLSearchParams({
+            action: "parse",
+            format: "json",
+            prop: "text",
+            page: pageTitle,
+            section: section.index
+        });
+        const secRes = await fetch(`${API}?${secParams}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+        const secJson = await secRes.json();
+        const html = secJson.parse?.text?.["*"];
+        return html ? html.replace(/<[^>]*>?/gm, "") : null;
+    } catch (err) {
+        console.error(`getWikiSection error (${pageTitle}#${sectionName}):`, err.message);
+        return null;
+    }
+}
+
 async function parseTemplates(text) {
-    const regex = /\{\{([^{}|]+)(?:\|([^{}]*))?\}\}/g;
-    const matches = [];
+    const templateRegex = /\{\{([^{}]+)\}\}/g;
     let match;
 
-    // 1. Synchronously find all matches and record their data
-    // This correctly uses the global regex flag and captures all matches' indices from the original text.
-    while ((match = regex.exec(text)) !== null) {
-        // Store crucial data, including the index and original length
-        matches.push({
-            fullMatch: match[0],
-            templateName: match[1].trim(),
-            param: match[2]?.trim(),
-            index: match.index, 
-            length: match[0].length,
-        });
-    }
+    while ((match = templateRegex.exec(text)) !== null) {
+        const templateName = match[1].trim();
+        let replacement;
 
-    // 2. Process all matches asynchronously in parallel
-    // This executes all the heavy, awaited API/network calls concurrently for efficiency.
-    const processedMatches = await Promise.all(matches.map(async (m) => {
-        const { fullMatch, templateName, param, index, length } = m;
-        let replacement = fullMatch; // Default to original if processing fails
-
-        // Directly try to fetch the page as-is
-        let wikiText = await getLeadSection(templateName);
-        let foundTitle = templateName;
-
-        if (wikiText) {
-            const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
-            replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
+        if (templateName.includes("#")) {
+            const [page, section] = templateName.split("#");
+            const sectionText = await getWikiSection(page.trim(), section.trim());
+            if (sectionText) {
+                const link = `<https://tagging.wiki/wiki/${encodeURIComponent(page.trim().replace(/ /g, "_"))}>`;
+                replacement = `**${page}#${section}** → ${sectionText.slice(0, 1000)}\n${link}`;
+            } else {
+                replacement = "I don't know.";
+            }
         } else {
-            replacement = "I don't know.";
+            const wikiText = await getLeadSection(templateName);
+            if (wikiText) {
+                const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
+                replacement = `**${templateName}** → ${wikiText.slice(0, 1000)}\n${link}`;
+            } else {
+                replacement = "I don't know.";
+            }
         }
 
-        // Return the replacement data needed for final string reconstruction
-        return { index, length, replacement };
-    }));
-
-    // 3. Reconstruct the string using the results by index
-    let result = text;
-    
-    // Sort by index descending (largest index first) to prevent earlier replacements 
-    // from invalidating the indices of later (shorter index) replacements.
-    processedMatches.sort((a, b) => b.index - a.index);
-
-    for (const { index, length, replacement } of processedMatches) {
-        // Replace the exact slice of text using index and length
-        result = result.slice(0, index) + replacement + result.slice(index + length);
+        text = text.replace(match[0], replacement);
     }
 
-    return result;
+    return text;
 }
 
 // -------------------- GEMINI --------------------
