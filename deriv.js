@@ -496,9 +496,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 maxOutputTokens: 2500,
                 config: {
                     systemInstruction: sysInstr,
-                    tools: [{
-                        googleSearch: {}
-                    }],
+                    // tools: [{
+                    //     googleSearch: {}
+                    // }],
                 },
                 history: chatHistories.get(channelId),
             });
