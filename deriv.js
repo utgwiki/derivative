@@ -362,6 +362,8 @@ async function parseTemplates(text) {
         const templateName = match[1].trim();
         let replacement;
 
+        console.log("templateName before # check:", templateName);
+        
         if (templateName.includes("#")) {
             const [pageTitle, section] = templateName.split("#").map(x => x.trim());
             const sectionIndex = await getSectionIndex(pageTitle, section);
@@ -374,6 +376,8 @@ async function parseTemplates(text) {
                 } else replacement = "I don't know.";
             } else replacement = "I don't know.";
         } else {
+            console.log("No # in templateName, skipping section branch");
+            
             const wikiText = await getLeadSection(templateName);
             if (wikiText) {
                 const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
