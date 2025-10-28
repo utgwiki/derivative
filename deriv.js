@@ -92,9 +92,7 @@ async function getAllNamespaces() {
             format: "json"
         });
         const res = await fetch(`${API}?${params.toString()}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
+            headers: { "User-Agent": "DiscordBot/Deriv" }
         });
         if (!res.ok) throw new Error(`Namespaces fetch failed: ${res.status}`);
         const json = await res.json();
@@ -106,15 +104,9 @@ async function getAllNamespaces() {
                 const id = parseInt(k, 10);
                 // namespace name is usually in the "*" property; fallback to canonical if present
                 const name = (v && (v["*"] || v.canonical || "")).toString().trim();
-                return {
-                    id,
-                    name
-                };
+                return { id, name };
             })
-            .filter(({
-                id,
-                name
-            }) => {
+            .filter(({ id, name }) => {
                 if (Number.isNaN(id) || id < 0) return false; // skip invalid / negative ids
                 const lower = name.toLowerCase();
                 // Exclude any namespace whose name contains "talk"
@@ -161,9 +153,7 @@ async function getAllPages() {
 
                 const url = `${API}?${params.toString()}`;
                 const res = await fetch(url, {
-                    headers: {
-                        "User-Agent": "DiscordBot/Deriv"
-                    }
+                    headers: { "User-Agent": "DiscordBot/Deriv" }
                 });
                 if (!res.ok) throw new Error(`Failed: ${res.status} ${res.statusText}`);
                 const json = await res.json();
@@ -220,9 +210,9 @@ async function findCanonicalTitle(input) {
     // try titlecasing namespace + words fallback
     if (norm.includes(":")) {
         const parts = norm.split(":").map((seg, i) =>
-            i === 0 ?
-            seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase() :
-            seg.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("_")
+            i === 0
+                ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()
+                : seg.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("_")
         );
         const alt = parts.join(":"); // e.g. "Dev:Outfit_Helper"
         if (pageLookup.has(alt.toLowerCase())) return pageLookup.get(alt.toLowerCase());
@@ -244,11 +234,7 @@ async function findCanonicalTitle(input) {
                 redirects: "1",
                 indexpageids: "1"
             });
-            const res = await fetch(`${API}?${params.toString()}`, {
-                headers: {
-                    "User-Agent": "DiscordBot/Deriv"
-                }
-            });
+            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
             if (!res.ok) continue;
             const json = await res.json();
             const pageids = json.query?.pageids || [];
@@ -311,9 +297,7 @@ async function getLeadSection(pageTitle) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
+            headers: { "User-Agent": "DiscordBot/Deriv" }
         });
         const json = await res.json();
         const html = json.parse?.text?.["*"];
@@ -337,227 +321,57 @@ function parseWikiLinks(text) {
 }
 
 async function parseTemplates(text) {
-    const templateRegex = /\{\{([^{}]+)\}\}/g;
+    const regex = /\{\{([^{}|]+)(?:\|([^{}]*))?\}\}/g;
+    const matches = [];
     let match;
 
-    // Resolve section index for a (possibly-redirecting) page title.
-    // Returns { index: string|null, canonical: string }.
-    // helper: find section index + anchor + canonical title
-    async function getSectionIndex(pageTitle, sectionName) {
-        const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
-        const params = new URLSearchParams({
-            action: "parse",
-            format: "json",
-            prop: "sections",
-            page: canonical
+    // 1. Synchronously find all matches and record their data
+    // This correctly uses the global regex flag and captures all matches' indices from the original text.
+    while ((match = regex.exec(text)) !== null) {
+        // Store crucial data, including the index and original length
+        matches.push({
+            fullMatch: match[0],
+            templateName: match[1].trim(),
+            param: match[2]?.trim(),
+            index: match.index, 
+            length: match[0].length,
         });
-
-        const res = await fetch(`${API}?${params}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
-        });
-        if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
-        const json = await res.json();
-        const sections = json.parse?.sections || [];
-
-        console.log(`Looking for section '${sectionName}' in ${canonical} sections:`, sections.map(s => s.line));
-
-        const needle = (sectionName || "").toLowerCase().replace(/\s+/g, " ").trim();
-
-        // 1) exact match on normalized section line or anchor
-        let found = sections.find(s => {
-            const lineNorm = (s.line || "").toLowerCase().replace(/\s+/g, " ").trim();
-            const anchorNorm = (s.anchor || "").toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ").trim();
-            if (!needle) return false;
-            if (lineNorm === needle) return true;
-            if (anchorNorm === needle) return true;
-            if (anchorNorm === needle.replace(/ /g, "_")) return true;
-            return false;
-        });
-
-        // 2) substring (fuzzy) match on heading text
-        if (!found) {
-            found = sections.find(s => {
-                const line = (s.line || "").toLowerCase();
-                return needle && line.includes(needle);
-            });
-        }
-
-        // 3) fallback: fetch full parsed HTML and look for headings that include the needle (try to map to a section anchor)
-        if (!found) {
-            try {
-                const p = new URLSearchParams({
-                    action: "parse",
-                    page: canonical,
-                    format: "json",
-                    prop: "text"
-                });
-                const r = await fetch(`${API}?${p}`, {
-                    headers: {
-                        "User-Agent": "DiscordBot/Deriv"
-                    }
-                });
-                if (r.ok) {
-                    const pj = await r.json();
-                    const html = pj.parse?.text?.["*"] || "";
-                    // Search headings <h1>-<h6> for a match
-                    const headingRegex = /<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi;
-                    let m;
-                    while ((m = headingRegex.exec(html)) !== null) {
-                        const rawHeading = m[2].replace(/<[^>]*>/g, "").toLowerCase().trim();
-                        if (needle && rawHeading.includes(needle)) {
-                            // try to find anchor/id near this heading by scanning a small window around the match
-                            const windowStart = Math.max(0, m.index - 200);
-                            const windowEnd = Math.min(html.length, m.index + m[0].length + 200);
-                            const nearby = html.slice(windowStart, windowEnd);
-                            // look for id or name or href="#anchor"
-                            const idMatch = nearby.match(/id=["']([^"']+)["']/i) || nearby.match(/name=["']([^"']+)["']/i) || nearby.match(/href=["']#([^"']+)["']/i);
-                            const anchorCandidate = idMatch ? idMatch[1] : null;
-                            if (anchorCandidate) {
-                                const sec = sections.find(s => (s.anchor || "") === anchorCandidate || (s.anchor || "").toLowerCase() === anchorCandidate.toLowerCase());
-                                if (sec) {
-                                    found = sec;
-                                    break;
-                                }
-                            }
-                            // if we couldn't map to a section object, try best-effort: use the first section whose line is similar
-                            const best = sections.find(s => (s.line || "").toLowerCase().startsWith(rawHeading.split(" ")[0]));
-                            if (best) {
-                                found = best;
-                                break;
-                            }
-                        }
-                    }
-                }
-            } catch (err) {
-                console.warn("Fallback heading scan failed:", err?.message || err);
-            }
-        }
-
-        return {
-            index: found ? found.index : null,
-            canonical,
-            anchor: found ? found.anchor : null,
-            line: found ? found.line : null
-        };
     }
 
-    // Fetch section HTML/text for a canonical page + section index.
-    async function getSectionContent(canonicalPageTitle, sectionIndex) {
-        const params = new URLSearchParams({
-            action: "parse",
-            format: "json",
-            prop: "text|wikitext",
-            page: canonicalPageTitle,
-            section: sectionIndex
-        });
+    // 2. Process all matches asynchronously in parallel
+    // This executes all the heavy, awaited API/network calls concurrently for efficiency.
+    const processedMatches = await Promise.all(matches.map(async (m) => {
+        const { fullMatch, templateName, param, index, length } = m;
+        let replacement = fullMatch; // Default to original if processing fails
 
-        console.log(`Finding section ${sectionIndex} in ${canonicalPageTitle}...`);
-        const res = await fetch(`${API}?${params}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
-        });
-        if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
-        const json = await res.json();
-        const html = json.parse?.text?.["*"] || "";
-        const wikitext = json.parse?.wikitext?.["*"] || "";
+        // Directly try to fetch the page as-is
+        let wikiText = await getLeadSection(templateName);
+        let foundTitle = templateName;
 
-        // Extract the main content div if possible
-        const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-        const contentHtml = mwMatch ? mwMatch[1] : html;
-        const cleanedHtml = contentHtml
-            .replace(/<script[\s\S]*?<\/script>/gi, "")
-            .replace(/<style[\s\S]*?<\/style>/gi, "");
-
-        const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
-
-        // fallback if the section is nearly empty
-        const outputText = plainText && plainText.length > 10 ? plainText : wikitext;
-
-        return {
-            html: cleanedHtml.trim() || null,
-            text: outputText || null
-        };
-    }
-
-    // Fetch lead (section 0) but attempt to return the parser output div if available.
-    async function getLeadSectionWithDiv(pageTitle) {
-        const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
-        const params = new URLSearchParams({
-            action: "parse",
-            format: "json",
-            prop: "text",
-            page: canonical,
-            section: "0"
-        });
-
-        const res = await fetch(`${API}?${params}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
-        });
-        if (!res.ok) return null;
-        const json = await res.json();
-        const html = json.parse?.text?.["*"] || "";
-
-        const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-        const contentHtml = mwMatch ? mwMatch[1] : html;
-        const cleanedHtml = contentHtml.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
-        const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
-
-        return {
-            canonical,
-            html: cleanedHtml.trim() || null,
-            text: plainText || null
-        };
-    }
-
-    while ((match = templateRegex.exec(text)) !== null) {
-        const templateName = match[1].trim();
-        let replacement;
-
-        console.log("templateName before # check:", templateName);
-
-        if (templateName.includes("#")) {
-            // page#Section
-            const [pageTitle, section] = templateName.split("#").map(x => x.trim());
-            const {
-                index: sectionIndex,
-                canonical,
-                anchor: sectionAnchor,
-                line: sectionLine
-            } = await getSectionIndex(pageTitle, section);
-
-            if (sectionIndex) {
-                const sectionObj = await getSectionContent(canonical, sectionIndex); // unchanged
-                if (sectionObj && (sectionObj.text || sectionObj.html)) {
-                    // prefer the real anchor if available
-                    const anchorPart = sectionAnchor ? `#${encodeURIComponent(sectionAnchor)}` : `#${encodeURIComponent(section.replace(/ /g, "_"))}`;
-                    const link = `https://tagging.wiki/wiki/${encodeURIComponent(canonical.replace(/ /g, "_"))}${anchorPart}`;
-                    const preview = (sectionObj.text || sectionObj.html || "").slice(0, 1000);
-                    replacement = `**${canonical}#${sectionLine || section}** → ${preview}\n<${link}>`;
-                } else replacement = "I don't know.";
-            }
-
+        if (wikiText) {
+            const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
+            replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
         } else {
-            // plain {{Page}} — follow redirects and extract lead section
-            const lead = await getLeadSectionWithDiv(templateName);
-            if (lead && (lead.text || lead.html)) {
-                const link = `https://tagging.wiki/wiki/${encodeURIComponent(lead.canonical.replace(/ /g, "_"))}`;
-                const preview = (lead.text || lead.html || "").slice(0, 1000);
-                replacement = `**${lead.canonical}** → ${preview}\n<${link}>`;
-            } else {
-                replacement = "I don't know.";
-            }
+            replacement = "I don't know.";
         }
 
-        // replace the whole {{...}} with the prepared replacement (do not escape)
-        text = text.replace(match[0], replacement);
+        // Return the replacement data needed for final string reconstruction
+        return { index, length, replacement };
+    }));
+
+    // 3. Reconstruct the string using the results by index
+    let result = text;
+    
+    // Sort by index descending (largest index first) to prevent earlier replacements 
+    // from invalidating the indices of later (shorter index) replacements.
+    processedMatches.sort((a, b) => b.index - a.index);
+
+    for (const { index, length, replacement } of processedMatches) {
+        // Replace the exact slice of text using index and length
+        result = result.slice(0, index) + replacement + result.slice(index + length);
     }
 
-    return text;
+    return result;
 }
 
 // -------------------- GEMINI --------------------
@@ -923,8 +737,6 @@ client.once("ready", async () => {
 });
 
 async function handleUserRequest(userMsg, messageOrInteraction) {
-    const parsedUserMsg = await parseTemplates(userMsg);
-
     // 1. Initial validation
     if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
 
@@ -997,58 +809,20 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
             }
         }
 
-        // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
-        const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
-        const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
-        if (linkMatches.length) {
-            const resolved = [];
-            for (const m of linkMatches) {
-                const raw = m[1].trim();
-                const canonical = await findCanonicalTitle(raw);
+// === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
+const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
+const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
+if (linkMatches.length) {
+    const resolved = [];
+    for (const m of linkMatches) {
+        const raw = m[1].trim();
+        const canonical = await findCanonicalTitle(raw);
 
-                if (!canonical) {
-                    // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
-                    const replyOptions = {
-                        content: "I don't know.",
-                        allowedMentions: {
-                            repliedUser: false
-                        }
-                    };
-                    if (isInteraction(messageOrInteraction)) {
-                        try {
-                            await messageOrInteraction.editReply(replyOptions);
-                        } catch {
-                            await messageOrInteraction.followUp(replyOptions);
-                        }
-                    } else {
-                        await messageOrInteraction.reply(replyOptions);
-                    }
-                    if (typingInterval) clearInterval(typingInterval);
-                    return;
-                }
-
-                resolved.push(canonical);
-            }
-
-            // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
-            const uniqueResolved = [...new Set(resolved)];
-            const urls = uniqueResolved.map(foundTitle => {
-                const parts = foundTitle.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
-                return `https://tagging.wiki/wiki/${parts.join(':')}`;
-            });
-
-            const replyOptions = {
-                content: urls.join("\n"),
-                allowedMentions: {
-                    repliedUser: false
-                }
-            };
+        if (!canonical) {
+            // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
+            const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
             if (isInteraction(messageOrInteraction)) {
-                try {
-                    await messageOrInteraction.editReply(replyOptions);
-                } catch {
-                    await messageOrInteraction.followUp(replyOptions);
-                }
+                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
             } else {
                 await messageOrInteraction.reply(replyOptions);
             }
@@ -1056,28 +830,39 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
             return;
         }
 
+        resolved.push(canonical);
+    }
+
+            // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
+            const uniqueResolved = [...new Set(resolved)];
+            const urls = uniqueResolved.map(foundTitle => {
+                const parts = foundTitle.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
+                return `https://tagging.wiki/wiki/${parts.join(':')}`;
+            });
+        
+            const replyOptions = { content: urls.join("\n"), allowedMentions: { repliedUser: false } };
+            if (isInteraction(messageOrInteraction)) {
+                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
+            } else {
+                await messageOrInteraction.reply(replyOptions);
+            }
+            if (typingInterval) clearInterval(typingInterval);
+            return;
+        }
+        
         // Detect explicit {{Template}} usage and resolve to canonical page title if present
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
-        const templateMatch = userMsg.match(/\{\{([^{}]+)\}\}/);
+        const templateMatch = userMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
         if (templateMatch) {
             const rawTemplate = templateMatch[1].trim();
             const canonical = await findCanonicalTitle(rawTemplate);
             if (!canonical) {
                 // Template doesn't exist → instantly reply "I don't know."
-                const replyOptions = {
-                    content: "I don't know.",
-                    allowedMentions: {
-                        repliedUser: false
-                    }
-                };
+                const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
                 if (messageOrInteraction.editReply) {
-                    try {
-                        await messageOrInteraction.editReply(replyOptions);
-                    } catch {
-                        await messageOrInteraction.followUp(replyOptions);
-                    }
+                    try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
                 } else {
                     await messageOrInteraction.reply(replyOptions);
                 }
@@ -1092,7 +877,7 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
         // ---- page ----
         let pageTitles = [];
         let wikiContent = "";
-
+        
         if (explicitTemplateFoundTitle && explicitTemplateContent) {
             pageTitles = [explicitTemplateFoundTitle];
             wikiContent = `\n\n--- Page: ${explicitTemplateFoundTitle} ---\n${explicitTemplateContent}`;
@@ -1108,19 +893,17 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
             }
         }
 
-        console.log("🧠 Gemini input:\n", parsedUserMsg);
-
         // 4. Generate the final AI reply
         const reply = await askGemini(
-            parsedUserMsg,
+            userMsg,
             wikiContent || undefined,
             pageTitles.join(", ") || undefined,
             imageParts,
             messageOrInteraction // Pass the Discord object for context/history
         );
 
-        let parsedReply = await parseTemplates(reply); // expand {{ }}
-        parsedReply = parseWikiLinks(parsedReply); // convert [[ ]] → wiki links
+        let parsedReply = await parseTemplates(reply);  // expand {{ }}
+        parsedReply = parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
 
         // 5. Prepare Media (Image)
         let imageUrl = null;
@@ -1175,12 +958,12 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
             if (mainSection.components && mainSection.components.length > 0) {
                 // Filter out any undefined components just in case
                 mainSection.components = mainSection.components.filter(c => c !== undefined);
-
+            
                 if (mainSection.components.length > 0) {
                     container.addSectionComponents(mainSection);
                 }
             }
-
+            
             // Only create button if explicitTemplateFoundTitle is defined
             if (explicitTemplateFoundTitle) {
                 try {
@@ -1190,7 +973,7 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
                         .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
                         .setStyle(ButtonStyle.Link)
                         .setURL(pageUrl);
-
+            
                     // Only add btn if it's not undefined
                     if (btn) row.addComponents(btn);
                     if (row.components.length > 0) container.addActionRowComponents(row);
@@ -1198,7 +981,7 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
                     console.warn("Failed to create template link button:", err);
                 }
             }
-
+            
             // Action Row for Buttons
             // if (buttons.length > 0) {
             // const row = new ActionRowBuilder();
@@ -1295,7 +1078,7 @@ client.on("messageCreate", async (message) => {
     // If the message content does not contain a wiki link or template, return early.
     if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
 
-    let userMsg = message.content.trim();
+    const userMsg = message.content.trim();
     if (!userMsg) return;
 
     await handleUserRequest(userMsg, message);
@@ -1348,8 +1131,8 @@ client.on("interactionCreate", async (interaction) => {
     const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
 
     const isPrivateChannel = interaction.channel &&
-        (interaction.channel.type === ChannelType.DM ||
-            interaction.channel.type === ChannelType.GroupDM);
+    (interaction.channel.type === ChannelType.DM ||
+     interaction.channel.type === ChannelType.GroupDM);
 
     // Only make response public in DMs
     const ephemeralSetting = !isPrivateChannel;
