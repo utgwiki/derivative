@@ -337,189 +337,227 @@ function parseWikiLinks(text) {
 }
 
 async function parseTemplates(text) {
-  const templateRegex = /\{\{([^{}]+)\}\}/g;
-  let match;
+    const templateRegex = /\{\{([^{}]+)\}\}/g;
+    let match;
 
-  // Resolve section index for a (possibly-redirecting) page title.
-  // Returns { index: string|null, canonical: string }.
+    // Resolve section index for a (possibly-redirecting) page title.
+    // Returns { index: string|null, canonical: string }.
     // helper: find section index + anchor + canonical title
     async function getSectionIndex(pageTitle, sectionName) {
-      const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
-      const params = new URLSearchParams({
-        action: "parse",
-        format: "json",
-        prop: "sections",
-        page: canonical
-      });
-    
-      const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
-      if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
-      const json = await res.json();
-      const sections = json.parse?.sections || [];
-    
-      console.log(`Looking for section '${sectionName}' in ${canonical} sections:`, sections.map(s => s.line));
-    
-      const needle = (sectionName || "").toLowerCase().replace(/\s+/g, " ").trim();
-    
-      // 1) exact match on normalized section line or anchor
-      let found = sections.find(s => {
-        const lineNorm = (s.line || "").toLowerCase().replace(/\s+/g, " ").trim();
-        const anchorNorm = (s.anchor || "").toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ").trim();
-        if (!needle) return false;
-        if (lineNorm === needle) return true;
-        if (anchorNorm === needle) return true;
-        if (anchorNorm === needle.replace(/ /g, "_")) return true;
-        return false;
-      });
-    
-      // 2) substring (fuzzy) match on heading text
-      if (!found) {
-        found = sections.find(s => {
-          const line = (s.line || "").toLowerCase();
-          return needle && line.includes(needle);
+        const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
+        const params = new URLSearchParams({
+            action: "parse",
+            format: "json",
+            prop: "sections",
+            page: canonical
         });
-      }
-    
-      // 3) fallback: fetch full parsed HTML and look for headings that include the needle (try to map to a section anchor)
-      if (!found) {
-        try {
-          const p = new URLSearchParams({ action: "parse", page: canonical, format: "json", prop: "text" });
-          const r = await fetch(`${API}?${p}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
-          if (r.ok) {
-            const pj = await r.json();
-            const html = pj.parse?.text?.["*"] || "";
-            // Search headings <h1>-<h6> for a match
-            const headingRegex = /<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi;
-            let m;
-            while ((m = headingRegex.exec(html)) !== null) {
-              const rawHeading = m[2].replace(/<[^>]*>/g, "").toLowerCase().trim();
-              if (needle && rawHeading.includes(needle)) {
-                // try to find anchor/id near this heading by scanning a small window around the match
-                const windowStart = Math.max(0, m.index - 200);
-                const windowEnd = Math.min(html.length, m.index + m[0].length + 200);
-                const nearby = html.slice(windowStart, windowEnd);
-                // look for id or name or href="#anchor"
-                const idMatch = nearby.match(/id=["']([^"']+)["']/i) || nearby.match(/name=["']([^"']+)["']/i) || nearby.match(/href=["']#([^"']+)["']/i);
-                const anchorCandidate = idMatch ? idMatch[1] : null;
-                if (anchorCandidate) {
-                  const sec = sections.find(s => (s.anchor || "") === anchorCandidate || (s.anchor || "").toLowerCase() === anchorCandidate.toLowerCase());
-                  if (sec) { found = sec; break; }
-                }
-                // if we couldn't map to a section object, try best-effort: use the first section whose line is similar
-                const best = sections.find(s => (s.line || "").toLowerCase().startsWith(rawHeading.split(" ")[0]));
-                if (best) { found = best; break; }
-              }
+
+        const res = await fetch(`${API}?${params}`, {
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
             }
-          }
-        } catch (err) {
-          console.warn("Fallback heading scan failed:", err?.message || err);
-        }
-      }
-    
-      return {
-        index: found ? found.index : null,
-        canonical,
-        anchor: found ? found.anchor : null,
-        line: found ? found.line : null
-      };
-    }
+        });
+        if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
+        const json = await res.json();
+        const sections = json.parse?.sections || [];
 
-  // Fetch section HTML/text for a canonical page + section index.
-  // Returns { html: string|null, text: string|null } (text is plain-text fallback).
-  async function getSectionContent(canonicalPageTitle, sectionIndex) {
-    const params = new URLSearchParams({
-      action: "parse",
-      format: "json",
-      prop: "text",
-      page: canonicalPageTitle,
-      section: sectionIndex
-    });
+        console.log(`Looking for section '${sectionName}' in ${canonical} sections:`, sections.map(s => s.line));
 
-    console.log(`Finding section ${sectionIndex} in ${canonicalPageTitle}...`);
-    const res = await fetch(`${API}?${params}`, {
-      headers: { "User-Agent": "DiscordBot/Deriv" }
-    });
-    if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
-    const json = await res.json();
-    const html = json.parse?.text?.["*"] || "";
+        const needle = (sectionName || "").toLowerCase().replace(/\s+/g, " ").trim();
 
-    // Try to extract the main content container if present (mw-parser-output)
-    const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    const contentHtml = mwMatch ? mwMatch[1] : html;
+        // 1) exact match on normalized section line or anchor
+        let found = sections.find(s => {
+            const lineNorm = (s.line || "").toLowerCase().replace(/\s+/g, " ").trim();
+            const anchorNorm = (s.anchor || "").toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ").trim();
+            if (!needle) return false;
+            if (lineNorm === needle) return true;
+            if (anchorNorm === needle) return true;
+            if (anchorNorm === needle.replace(/ /g, "_")) return true;
+            return false;
+        });
 
-    // Remove script/style blocks just in case
-    const cleanedHtml = contentHtml
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "");
-
-    const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
-
-    return { html: cleanedHtml.trim() || null, text: plainText || null };
-  }
-
-  // Fetch lead (section 0) but attempt to return the parser output div if available.
-  async function getLeadSectionWithDiv(pageTitle) {
-    const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
-    const params = new URLSearchParams({
-      action: "parse",
-      format: "json",
-      prop: "text",
-      page: canonical,
-      section: "0"
-    });
-
-    const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const html = json.parse?.text?.["*"] || "";
-
-    const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    const contentHtml = mwMatch ? mwMatch[1] : html;
-    const cleanedHtml = contentHtml.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
-    const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
-
-    return { canonical, html: cleanedHtml.trim() || null, text: plainText || null };
-  }
-
-  while ((match = templateRegex.exec(text)) !== null) {
-    const templateName = match[1].trim();
-    let replacement;
-
-    console.log("templateName before # check:", templateName);
-
-    if (templateName.includes("#")) {
-      // page#Section
-      const [pageTitle, section] = templateName.split("#").map(x => x.trim());
-      const { index: sectionIndex, canonical, anchor: sectionAnchor, line: sectionLine } = await getSectionIndex(pageTitle, section);
-        
-        if (sectionIndex) {
-          const sectionObj = await getSectionContent(canonical, sectionIndex); // unchanged
-          if (sectionObj && (sectionObj.text || sectionObj.html)) {
-            // prefer the real anchor if available
-            const anchorPart = sectionAnchor ? `#${encodeURIComponent(sectionAnchor)}` : `#${encodeURIComponent(section.replace(/ /g, "_"))}`;
-            const link = `https://tagging.wiki/wiki/${encodeURIComponent(canonical.replace(/ /g, "_"))}${anchorPart}`;
-            const preview = (sectionObj.text || sectionObj.html || "").slice(0, 1000);
-            replacement = `**${canonical}#${sectionLine || section}** → ${preview}\n<${link}>`;
-          } else replacement = "I don't know.";
+        // 2) substring (fuzzy) match on heading text
+        if (!found) {
+            found = sections.find(s => {
+                const line = (s.line || "").toLowerCase();
+                return needle && line.includes(needle);
+            });
         }
 
-    } else {
-      // plain {{Page}} — follow redirects and extract lead section
-      const lead = await getLeadSectionWithDiv(templateName);
-      if (lead && (lead.text || lead.html)) {
-        const link = `https://tagging.wiki/wiki/${encodeURIComponent(lead.canonical.replace(/ /g, "_"))}`;
-        const preview = (lead.text || lead.html || "").slice(0, 1000);
-        replacement = `**${lead.canonical}** → ${preview}\n<${link}>`;
-      } else {
-        replacement = "I don't know.";
-      }
+        // 3) fallback: fetch full parsed HTML and look for headings that include the needle (try to map to a section anchor)
+        if (!found) {
+            try {
+                const p = new URLSearchParams({
+                    action: "parse",
+                    page: canonical,
+                    format: "json",
+                    prop: "text"
+                });
+                const r = await fetch(`${API}?${p}`, {
+                    headers: {
+                        "User-Agent": "DiscordBot/Deriv"
+                    }
+                });
+                if (r.ok) {
+                    const pj = await r.json();
+                    const html = pj.parse?.text?.["*"] || "";
+                    // Search headings <h1>-<h6> for a match
+                    const headingRegex = /<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi;
+                    let m;
+                    while ((m = headingRegex.exec(html)) !== null) {
+                        const rawHeading = m[2].replace(/<[^>]*>/g, "").toLowerCase().trim();
+                        if (needle && rawHeading.includes(needle)) {
+                            // try to find anchor/id near this heading by scanning a small window around the match
+                            const windowStart = Math.max(0, m.index - 200);
+                            const windowEnd = Math.min(html.length, m.index + m[0].length + 200);
+                            const nearby = html.slice(windowStart, windowEnd);
+                            // look for id or name or href="#anchor"
+                            const idMatch = nearby.match(/id=["']([^"']+)["']/i) || nearby.match(/name=["']([^"']+)["']/i) || nearby.match(/href=["']#([^"']+)["']/i);
+                            const anchorCandidate = idMatch ? idMatch[1] : null;
+                            if (anchorCandidate) {
+                                const sec = sections.find(s => (s.anchor || "") === anchorCandidate || (s.anchor || "").toLowerCase() === anchorCandidate.toLowerCase());
+                                if (sec) {
+                                    found = sec;
+                                    break;
+                                }
+                            }
+                            // if we couldn't map to a section object, try best-effort: use the first section whose line is similar
+                            const best = sections.find(s => (s.line || "").toLowerCase().startsWith(rawHeading.split(" ")[0]));
+                            if (best) {
+                                found = best;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("Fallback heading scan failed:", err?.message || err);
+            }
+        }
+
+        return {
+            index: found ? found.index : null,
+            canonical,
+            anchor: found ? found.anchor : null,
+            line: found ? found.line : null
+        };
     }
 
-    // replace the whole {{...}} with the prepared replacement (do not escape)
-    text = text.replace(match[0], replacement);
-  }
+    // Fetch section HTML/text for a canonical page + section index.
+    async function getSectionContent(canonicalPageTitle, sectionIndex) {
+        const params = new URLSearchParams({
+            action: "parse",
+            format: "json",
+            prop: "text|wikitext",
+            page: canonicalPageTitle,
+            section: sectionIndex
+        });
 
-  return text;
+        console.log(`Finding section ${sectionIndex} in ${canonicalPageTitle}...`);
+        const res = await fetch(`${API}?${params}`, {
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
+            }
+        });
+        if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
+        const json = await res.json();
+        const html = json.parse?.text?.["*"] || "";
+        const wikitext = json.parse?.wikitext?.["*"] || "";
+
+        // Extract the main content div if possible
+        const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+        const contentHtml = mwMatch ? mwMatch[1] : html;
+        const cleanedHtml = contentHtml
+            .replace(/<script[\s\S]*?<\/script>/gi, "")
+            .replace(/<style[\s\S]*?<\/style>/gi, "");
+
+        const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
+
+        // fallback if the section is nearly empty
+        const outputText = plainText && plainText.length > 10 ? plainText : wikitext;
+
+        return {
+            html: cleanedHtml.trim() || null,
+            text: outputText || null
+        };
+    }
+
+    // Fetch lead (section 0) but attempt to return the parser output div if available.
+    async function getLeadSectionWithDiv(pageTitle) {
+        const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
+        const params = new URLSearchParams({
+            action: "parse",
+            format: "json",
+            prop: "text",
+            page: canonical,
+            section: "0"
+        });
+
+        const res = await fetch(`${API}?${params}`, {
+            headers: {
+                "User-Agent": "DiscordBot/Deriv"
+            }
+        });
+        if (!res.ok) return null;
+        const json = await res.json();
+        const html = json.parse?.text?.["*"] || "";
+
+        const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+        const contentHtml = mwMatch ? mwMatch[1] : html;
+        const cleanedHtml = contentHtml.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
+        const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
+
+        return {
+            canonical,
+            html: cleanedHtml.trim() || null,
+            text: plainText || null
+        };
+    }
+
+    while ((match = templateRegex.exec(text)) !== null) {
+        const templateName = match[1].trim();
+        let replacement;
+
+        console.log("templateName before # check:", templateName);
+
+        if (templateName.includes("#")) {
+            // page#Section
+            const [pageTitle, section] = templateName.split("#").map(x => x.trim());
+            const {
+                index: sectionIndex,
+                canonical,
+                anchor: sectionAnchor,
+                line: sectionLine
+            } = await getSectionIndex(pageTitle, section);
+
+            if (sectionIndex) {
+                const sectionObj = await getSectionContent(canonical, sectionIndex); // unchanged
+                if (sectionObj && (sectionObj.text || sectionObj.html)) {
+                    // prefer the real anchor if available
+                    const anchorPart = sectionAnchor ? `#${encodeURIComponent(sectionAnchor)}` : `#${encodeURIComponent(section.replace(/ /g, "_"))}`;
+                    const link = `https://tagging.wiki/wiki/${encodeURIComponent(canonical.replace(/ /g, "_"))}${anchorPart}`;
+                    const preview = (sectionObj.text || sectionObj.html || "").slice(0, 1000);
+                    replacement = `**${canonical}#${sectionLine || section}** → ${preview}\n<${link}>`;
+                } else replacement = "I don't know.";
+            }
+
+        } else {
+            // plain {{Page}} — follow redirects and extract lead section
+            const lead = await getLeadSectionWithDiv(templateName);
+            if (lead && (lead.text || lead.html)) {
+                const link = `https://tagging.wiki/wiki/${encodeURIComponent(lead.canonical.replace(/ /g, "_"))}`;
+                const preview = (lead.text || lead.html || "").slice(0, 1000);
+                replacement = `**${lead.canonical}** → ${preview}\n<${link}>`;
+            } else {
+                replacement = "I don't know.";
+            }
+        }
+
+        // replace the whole {{...}} with the prepared replacement (do not escape)
+        text = text.replace(match[0], replacement);
+    }
+
+    return text;
 }
 
 // -------------------- GEMINI --------------------
@@ -886,7 +924,7 @@ client.once("ready", async () => {
 
 async function handleUserRequest(userMsg, messageOrInteraction) {
     const parsedUserMsg = await parseTemplates(userMsg);
-    
+
     // 1. Initial validation
     if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
 
@@ -1259,7 +1297,7 @@ client.on("messageCreate", async (message) => {
 
     let userMsg = message.content.trim();
     if (!userMsg) return;
-    
+
     await handleUserRequest(userMsg, message);
 });
 
