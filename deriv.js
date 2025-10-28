@@ -1150,6 +1150,7 @@ client.on("messageCreate", async (message) => {
     if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
 
     const userMsg = message.content.trim();
+    userMsg = await parseTemplates(userMsg);
     if (!userMsg) return;
 
     await handleUserRequest(userMsg, message);
