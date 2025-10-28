@@ -342,34 +342,87 @@ async function parseTemplates(text) {
 
   // Resolve section index for a (possibly-redirecting) page title.
   // Returns { index: string|null, canonical: string }.
-  async function getSectionIndex(pageTitle, sectionName) {
-    const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
-    const params = new URLSearchParams({
-      action: "parse",
-      format: "json",
-      prop: "sections",
-      page: canonical
-    });
-
-    const res = await fetch(`${API}?${params}`, {
-      headers: { "User-Agent": "DiscordBot/Deriv" }
-    });
-    if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
-    const json = await res.json();
-    const sections = json.parse?.sections || [];
-
-    console.log(`Looking for section '${sectionName}' in ${canonical} sections:`, sections.map(s => s.line));
-
-    const needleNormalized = sectionName.toLowerCase().replace(/\s+/g, " ").trim();
-    const found = sections.find(s => {
-      const lineNorm = (s.line || "").toLowerCase().replace(/\s+/g, " ").trim();
-      // some wikis have anchors; try 'anchor' as well (usually the section fragment)
-      const anchor = (s.anchor || "").toLowerCase().replace(/_/g, " ").trim();
-      return lineNorm === needleNormalized || anchor === needleNormalized.replace(/ /g, "_");
-    });
-
-    return { index: found ? found.index : null, canonical };
-  }
+    // helper: find section index + anchor + canonical title
+    async function getSectionIndex(pageTitle, sectionName) {
+      const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
+      const params = new URLSearchParams({
+        action: "parse",
+        format: "json",
+        prop: "sections",
+        page: canonical
+      });
+    
+      const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+      if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
+      const json = await res.json();
+      const sections = json.parse?.sections || [];
+    
+      console.log(`Looking for section '${sectionName}' in ${canonical} sections:`, sections.map(s => s.line));
+    
+      const needle = (sectionName || "").toLowerCase().replace(/\s+/g, " ").trim();
+    
+      // 1) exact match on normalized section line or anchor
+      let found = sections.find(s => {
+        const lineNorm = (s.line || "").toLowerCase().replace(/\s+/g, " ").trim();
+        const anchorNorm = (s.anchor || "").toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ").trim();
+        if (!needle) return false;
+        if (lineNorm === needle) return true;
+        if (anchorNorm === needle) return true;
+        if (anchorNorm === needle.replace(/ /g, "_")) return true;
+        return false;
+      });
+    
+      // 2) substring (fuzzy) match on heading text
+      if (!found) {
+        found = sections.find(s => {
+          const line = (s.line || "").toLowerCase();
+          return needle && line.includes(needle);
+        });
+      }
+    
+      // 3) fallback: fetch full parsed HTML and look for headings that include the needle (try to map to a section anchor)
+      if (!found) {
+        try {
+          const p = new URLSearchParams({ action: "parse", page: canonical, format: "json", prop: "text" });
+          const r = await fetch(`${API}?${p}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+          if (r.ok) {
+            const pj = await r.json();
+            const html = pj.parse?.text?.["*"] || "";
+            // Search headings <h1>-<h6> for a match
+            const headingRegex = /<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi;
+            let m;
+            while ((m = headingRegex.exec(html)) !== null) {
+              const rawHeading = m[2].replace(/<[^>]*>/g, "").toLowerCase().trim();
+              if (needle && rawHeading.includes(needle)) {
+                // try to find anchor/id near this heading by scanning a small window around the match
+                const windowStart = Math.max(0, m.index - 200);
+                const windowEnd = Math.min(html.length, m.index + m[0].length + 200);
+                const nearby = html.slice(windowStart, windowEnd);
+                // look for id or name or href="#anchor"
+                const idMatch = nearby.match(/id=["']([^"']+)["']/i) || nearby.match(/name=["']([^"']+)["']/i) || nearby.match(/href=["']#([^"']+)["']/i);
+                const anchorCandidate = idMatch ? idMatch[1] : null;
+                if (anchorCandidate) {
+                  const sec = sections.find(s => (s.anchor || "") === anchorCandidate || (s.anchor || "").toLowerCase() === anchorCandidate.toLowerCase());
+                  if (sec) { found = sec; break; }
+                }
+                // if we couldn't map to a section object, try best-effort: use the first section whose line is similar
+                const best = sections.find(s => (s.line || "").toLowerCase().startsWith(rawHeading.split(" ")[0]));
+                if (best) { found = best; break; }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Fallback heading scan failed:", err?.message || err);
+        }
+      }
+    
+      return {
+        index: found ? found.index : null,
+        canonical,
+        anchor: found ? found.anchor : null,
+        line: found ? found.line : null
+      };
+    }
 
   // Fetch section HTML/text for a canonical page + section index.
   // Returns { html: string|null, text: string|null } (text is plain-text fallback).
@@ -437,22 +490,18 @@ async function parseTemplates(text) {
     if (templateName.includes("#")) {
       // page#Section
       const [pageTitle, section] = templateName.split("#").map(x => x.trim());
-      const { index: sectionIndex, canonical } = await getSectionIndex(pageTitle, section);
-      console.log(`pageTitle is ${pageTitle}, resolved canonical = ${canonical}, section is ${section}.`);
-
-      if (sectionIndex) {
-        const sectionObj = await getSectionContent(canonical, sectionIndex);
-        if (sectionObj && (sectionObj.text || sectionObj.html)) {
-          const link = `https://tagging.wiki/wiki/${encodeURIComponent(canonical.replace(/ /g, "_"))}#${encodeURIComponent(section.replace(/ /g, "_"))}`;
-          // prefer plain text for chat output; include HTML only if that's what you want (sectionObj.html)
-          const preview = (sectionObj.text || sectionObj.html || "").slice(0, 1000);
-          replacement = `**${canonical}#${section}** → ${preview}\n<${link}>`;
-        } else {
-          replacement = "I don't know.";
+      const { index: sectionIndex, canonical, anchor: sectionAnchor, line: sectionLine } = await getSectionIndex(pageTitle, section);
+        
+        if (sectionIndex) {
+          const sectionObj = await getSectionContent(canonical, sectionIndex); // unchanged
+          if (sectionObj && (sectionObj.text || sectionObj.html)) {
+            // prefer the real anchor if available
+            const anchorPart = sectionAnchor ? `#${encodeURIComponent(sectionAnchor)}` : `#${encodeURIComponent(section.replace(/ /g, "_"))}`;
+            const link = `https://tagging.wiki/wiki/${encodeURIComponent(canonical.replace(/ /g, "_"))}${anchorPart}`;
+            const preview = (sectionObj.text || sectionObj.html || "").slice(0, 1000);
+            replacement = `**${canonical}#${sectionLine || section}** → ${preview}\n<${link}>`;
+          } else replacement = "I don't know.";
         }
-      } else {
-        replacement = "I don't know.";
-      }
 
     } else {
       // plain {{Page}} — follow redirects and extract lead section
