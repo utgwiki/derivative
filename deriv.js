@@ -1070,6 +1070,8 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
             }
         }
 
+        console.log("🧠 Gemini input:\n", parsedUserMsg);
+
         // 4. Generate the final AI reply
         const reply = await askGemini(
             parsedUserMsg,
