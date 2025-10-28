@@ -1153,7 +1153,7 @@ client.on("messageCreate", async (message) => {
     const parsedUserMsg = await parseTemplates(userMsg);
     if (!userMsg) return;
 
-    await handleUserRequest(userMsg, message);
+    await handleUserRequest(parsedUserMsg, message);
 });
 
 client.on("interactionCreate", async (interaction) => {
