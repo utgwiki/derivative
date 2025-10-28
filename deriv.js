@@ -916,7 +916,7 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
-        const templateMatch = userMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
+        const templateMatch = userMsg.match(/\{\{([^{}]+)\}\}/);
         if (templateMatch) {
             const rawTemplate = templateMatch[1].trim();
             const canonical = await findCanonicalTitle(rawTemplate);
