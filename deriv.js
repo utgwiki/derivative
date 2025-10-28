@@ -1149,7 +1149,7 @@ client.on("messageCreate", async (message) => {
     // If the message content does not contain a wiki link or template, return early.
     if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
 
-    const userMsg = message.content.trim();
+    let userMsg = message.content.trim();
     userMsg = await parseTemplates(userMsg);
     if (!userMsg) return;
 
