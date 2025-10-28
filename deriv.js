@@ -966,7 +966,7 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
 
         // 4. Generate the final AI reply
         const reply = await askGemini(
-            userMsg,
+            parsedUserMsg,
             wikiContent || undefined,
             pageTitles.join(", ") || undefined,
             imageParts,
@@ -1150,7 +1150,7 @@ client.on("messageCreate", async (message) => {
     if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
 
     let userMsg = message.content.trim();
-    userMsg = await parseTemplates(userMsg);
+    const parsedUserMsg = await parseTemplates(userMsg);
     if (!userMsg) return;
 
     await handleUserRequest(userMsg, message);
