@@ -781,6 +781,8 @@ client.once("ready", async () => {
 });
 
 async function handleUserRequest(userMsg, messageOrInteraction) {
+    const parsedUserMsg = await parseTemplates(userMsg);
+    
     // 1. Initial validation
     if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
 
@@ -1150,10 +1152,9 @@ client.on("messageCreate", async (message) => {
     if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
 
     let userMsg = message.content.trim();
-    const parsedUserMsg = await parseTemplates(userMsg);
     if (!userMsg) return;
-
-    await handleUserRequest(parsedUserMsg, message);
+    
+    await handleUserRequest(userMsg, message);
 });
 
 client.on("interactionCreate", async (interaction) => {
