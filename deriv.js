@@ -337,85 +337,140 @@ function parseWikiLinks(text) {
 }
 
 async function parseTemplates(text) {
-    const templateRegex = /\{\{([^{}]+)\}\}/g;
-    let match;
+  const templateRegex = /\{\{([^{}]+)\}\}/g;
+  let match;
 
-    async function getSectionIndex(pageTitle, sectionName) {
-        const params = new URLSearchParams({
-            action: "parse",
-            format: "json",
-            prop: "sections",
-            page: pageTitle
-        });
-        
-        const res = await fetch(`${API}?${params}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
-        });
-        if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
-        const json = await res.json();
-        const sections = json.parse.sections || [];
+  // Resolve section index for a (possibly-redirecting) page title.
+  // Returns { index: string|null, canonical: string }.
+  async function getSectionIndex(pageTitle, sectionName) {
+    const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
+    const params = new URLSearchParams({
+      action: "parse",
+      format: "json",
+      prop: "sections",
+      page: canonical
+    });
 
-        console.log(`Looking for section '${sectionName}' in ${pageTitle} sections:`, sections.map(s => s.line));
-        
-        const found = sections.find(s =>
-            s.line.trim().toLowerCase().replace(/\s+/g, " ") === sectionName.toLowerCase().replace(/\s+/g, " ")
-        );
-        return found ? found.index : null;
-    }
+    const res = await fetch(`${API}?${params}`, {
+      headers: { "User-Agent": "DiscordBot/Deriv" }
+    });
+    if (!res.ok) throw new Error(`Failed to get section index: ${res.status}`);
+    const json = await res.json();
+    const sections = json.parse?.sections || [];
 
-    async function getSectionContent(pageTitle, sectionIndex) {
-        const params = new URLSearchParams({
-            action: "parse",
-            format: "json",
-            prop: "text",
-            page: pageTitle,
-            section: sectionIndex
-        });
-        console.log(`Finding section ${sectionIndex} in ${pageTitle}...`);
-        const res = await fetch(`${API}?${params}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Deriv"
-            }
-        });
-        if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
-        const json = await res.json();
-        const html = json.parse?.text?.["*"];
-        return html ? html.replace(/<[^>]*>?/gm, "") : null;
-    }
+    console.log(`Looking for section '${sectionName}' in ${canonical} sections:`, sections.map(s => s.line));
 
-    while ((match = templateRegex.exec(text)) !== null) {
-        const templateName = match[1].trim();
-        let replacement;
+    const needleNormalized = sectionName.toLowerCase().replace(/\s+/g, " ").trim();
+    const found = sections.find(s => {
+      const lineNorm = (s.line || "").toLowerCase().replace(/\s+/g, " ").trim();
+      // some wikis have anchors; try 'anchor' as well (usually the section fragment)
+      const anchor = (s.anchor || "").toLowerCase().replace(/_/g, " ").trim();
+      return lineNorm === needleNormalized || anchor === needleNormalized.replace(/ /g, "_");
+    });
 
-        console.log("templateName before # check:", templateName);
+    return { index: found ? found.index : null, canonical };
+  }
 
-        if (templateName.includes("#")) {
-            const [pageTitle, section] = templateName.split("#").map(x => x.trim());
-            const sectionIndex = await getSectionIndex(pageTitle, section);
-            console.log(`pageTitle is ${pageTitle}, section is ${section}.`);
-            if (sectionIndex) {
-                const sectionText = await getSectionContent(pageTitle, sectionIndex);
-                if (sectionText) {
-                    const link = `<https://tagging.wiki/wiki/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}#${encodeURIComponent(section.replace(/ /g, "_"))}>`;
-                    replacement = `**${pageTitle}#${section}** → ${sectionText.slice(0, 1000)}\n${link}`;
-                } else replacement = "I don't know.";
-            } else replacement = "I don't know.";
+  // Fetch section HTML/text for a canonical page + section index.
+  // Returns { html: string|null, text: string|null } (text is plain-text fallback).
+  async function getSectionContent(canonicalPageTitle, sectionIndex) {
+    const params = new URLSearchParams({
+      action: "parse",
+      format: "json",
+      prop: "text",
+      page: canonicalPageTitle,
+      section: sectionIndex
+    });
+
+    console.log(`Finding section ${sectionIndex} in ${canonicalPageTitle}...`);
+    const res = await fetch(`${API}?${params}`, {
+      headers: { "User-Agent": "DiscordBot/Deriv" }
+    });
+    if (!res.ok) throw new Error(`Failed to fetch section: ${res.status}`);
+    const json = await res.json();
+    const html = json.parse?.text?.["*"] || "";
+
+    // Try to extract the main content container if present (mw-parser-output)
+    const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const contentHtml = mwMatch ? mwMatch[1] : html;
+
+    // Remove script/style blocks just in case
+    const cleanedHtml = contentHtml
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "");
+
+    const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
+
+    return { html: cleanedHtml.trim() || null, text: plainText || null };
+  }
+
+  // Fetch lead (section 0) but attempt to return the parser output div if available.
+  async function getLeadSectionWithDiv(pageTitle) {
+    const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
+    const params = new URLSearchParams({
+      action: "parse",
+      format: "json",
+      prop: "text",
+      page: canonical,
+      section: "0"
+    });
+
+    const res = await fetch(`${API}?${params}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const html = json.parse?.text?.["*"] || "";
+
+    const mwMatch = html.match(/<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const contentHtml = mwMatch ? mwMatch[1] : html;
+    const cleanedHtml = contentHtml.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
+    const plainText = cleanedHtml.replace(/<[^>]*>/g, "").replace(/\s{2,}/g, " ").trim();
+
+    return { canonical, html: cleanedHtml.trim() || null, text: plainText || null };
+  }
+
+  while ((match = templateRegex.exec(text)) !== null) {
+    const templateName = match[1].trim();
+    let replacement;
+
+    console.log("templateName before # check:", templateName);
+
+    if (templateName.includes("#")) {
+      // page#Section
+      const [pageTitle, section] = templateName.split("#").map(x => x.trim());
+      const { index: sectionIndex, canonical } = await getSectionIndex(pageTitle, section);
+      console.log(`pageTitle is ${pageTitle}, resolved canonical = ${canonical}, section is ${section}.`);
+
+      if (sectionIndex) {
+        const sectionObj = await getSectionContent(canonical, sectionIndex);
+        if (sectionObj && (sectionObj.text || sectionObj.html)) {
+          const link = `https://tagging.wiki/wiki/${encodeURIComponent(canonical.replace(/ /g, "_"))}#${encodeURIComponent(section.replace(/ /g, "_"))}`;
+          // prefer plain text for chat output; include HTML only if that's what you want (sectionObj.html)
+          const preview = (sectionObj.text || sectionObj.html || "").slice(0, 1000);
+          replacement = `**${canonical}#${section}** → ${preview}\n<${link}>`;
         } else {
-            console.log("No # in templateName, skipping section branch");
-
-            const wikiText = await getLeadSection(templateName);
-            if (wikiText) {
-                const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
-                replacement = `**${templateName}** → ${wikiText.slice(0, 1000)}\n${link}`;
-            } else replacement = "I don't know.";
+          replacement = "I don't know.";
         }
+      } else {
+        replacement = "I don't know.";
+      }
 
-        text = text.replace(match[0], replacement);
+    } else {
+      // plain {{Page}} — follow redirects and extract lead section
+      const lead = await getLeadSectionWithDiv(templateName);
+      if (lead && (lead.text || lead.html)) {
+        const link = `https://tagging.wiki/wiki/${encodeURIComponent(lead.canonical.replace(/ /g, "_"))}`;
+        const preview = (lead.text || lead.html || "").slice(0, 1000);
+        replacement = `**${lead.canonical}** → ${preview}\n<${link}>`;
+      } else {
+        replacement = "I don't know.";
+      }
     }
 
-    return text;
+    // replace the whole {{...}} with the prepared replacement (do not escape)
+    text = text.replace(match[0], replacement);
+  }
+
+  return text;
 }
 
 // -------------------- GEMINI --------------------
