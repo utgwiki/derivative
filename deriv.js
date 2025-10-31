@@ -286,6 +286,67 @@ async function getWikiContent(pageTitle) {
     }
 }
 
+async function getSectionIndex(pageTitle, sectionName) {
+    const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
+    const params = new URLSearchParams({
+        action: "parse",
+        format: "json",
+        prop: "sections",
+        page: canonical
+    });
+
+    try {
+        const res = await fetch(`${API}?${params}`, {
+            headers: { "User-Agent": "DiscordBot/Deriv" }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        const json = await res.json();
+
+        const sections = json.parse?.sections || [];
+        if (!sections.length) return null;
+
+        // Try to find the section index case-insensitively
+        const match = sections.find(
+            s => s.line.toLowerCase() === sectionName.toLowerCase()
+        );
+
+        return match?.index || null;
+    } catch (err) {
+        console.error(`Failed to fetch section index for "${sectionName}" in "${pageTitle}":`, err.message);
+        return null;
+    }
+}
+
+async function getSectionContent(pageTitle, sectionName) {
+    const sectionIndex = await getSectionIndex(pageTitle, sectionName);
+    if (!sectionIndex) {
+        console.warn(`Section "${sectionName}" not found in "${pageTitle}"`);
+        return null;
+    }
+
+    const params = new URLSearchParams({
+        action: "parse",
+        format: "json",
+        prop: "text",
+        page: pageTitle,
+        section: sectionIndex
+    });
+
+    try {
+        const res = await fetch(`${API}?${params}`, {
+            headers: { "User-Agent": "DiscordBot/Deriv" }
+        });
+        const json = await res.json();
+
+        const html = json.parse?.text?.["*"];
+        if (!html) return null;
+        return html.replace(/<[^>]*>?/gm, ""); // strip HTML
+    } catch (err) {
+        console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
+        return null;
+    }
+}
+
 async function getLeadSection(pageTitle) {
     const params = new URLSearchParams({
         action: "parse",
@@ -856,10 +917,18 @@ if (linkMatches.length) {
         let explicitTemplateFoundTitle = null;
         const templateMatch = userMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
         if (templateMatch) {
-            const rawTemplate = templateMatch[1].trim();
+            let rawTemplate = templateMatch[1].trim();
+            let sectionName = null;
+        
+            // Detect {{Page#Section}} form
+            if (rawTemplate.includes("#")) {
+                const [page, section] = rawTemplate.split("#");
+                rawTemplate = page.trim();
+                sectionName = section.trim();
+            }
+        
             const canonical = await findCanonicalTitle(rawTemplate);
             if (!canonical) {
-                // Template doesn't exist → instantly reply "I don't know."
                 const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
                 if (messageOrInteraction.editReply) {
                     try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
@@ -867,10 +936,18 @@ if (linkMatches.length) {
                     await messageOrInteraction.reply(replyOptions);
                 }
                 if (typingInterval) clearInterval(typingInterval);
-                return; // stop further processing
+                return;
             }
+        
             explicitTemplateFoundTitle = canonical;
-            explicitTemplateContent = await getLeadSection(canonical); // use lead section
+        
+            // 👇 Add your section-aware logic HERE
+            if (sectionName) {
+                explicitTemplateContent = await getSectionContent(canonical, sectionName);
+            } else {
+                explicitTemplateContent = await getLeadSection(canonical);
+            }
+        
             explicitTemplateName = rawTemplate;
         }
 
