@@ -1013,7 +1013,7 @@ if (linkMatches.length) {
             mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(parsedReply)]);
 
             // Thumbnail accessory
-            if (typeof imageUrl === "string" && imageUrl.trim() !== "") {
+            if (imageUrl?.trim()) {
                 try {
                     const thumbnail = new ThumbnailBuilder().setURL(imageUrl);
                     mainSection.setThumbnailAccessory(thumbnail);
