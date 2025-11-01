@@ -1003,22 +1003,6 @@ if (linkMatches.length) {
             }
         }
 
-
-        // const buttons = [];
-        // if (pageTitles.length > 0) {
-        // for (const page of pageTitles.slice(0, 5)) {
-        // if (!page) continue;
-        // const pageUrl = `https://fischipedia.org/wiki/${encodeURIComponent(page.replace(/ /g, "_"))}`;
-        // try {
-        // const btn = new ButtonBuilder()
-        // .setLabel(String(page).slice(0, 80))
-        // .setStyle(ButtonStyle.Link)
-        // .setURL(pageUrl);
-        // buttons.push(btn);
-        // } catch (err) { console.warn("Skipping a problematic button:", err); }
-        // }
-        // }
-
         // 7. -------------------- TRY: Components V2 (best-effort) --------------------
         let sent = false;
         try {
@@ -1031,7 +1015,8 @@ if (linkMatches.length) {
             // Thumbnail accessory
             if (typeof imageUrl === "string" && imageUrl.trim() !== "") {
                 try {
-                    mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(imageUrl));
+                    const thumbnail = new ThumbnailBuilder().setURL(imageUrl);
+                    mainSection.setThumbnailAccessory(thumbnail);
                 } catch (err) {
                     console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
                 }
