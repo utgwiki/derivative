@@ -1014,15 +1014,14 @@ if (linkMatches.length) {
             console.log(`imageurl is ${imageUrl}`);
             
             // Thumbnail accessory
-            if (imageUrl) {
-                if (typeof imageUrl === "string" && imageUrl.trim() !== "") {
-                    try {
-                        mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(imageUrl));
-                    } catch (err) {
-                        console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
-                    }
-                }
-            }
+            const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png"; 
+            const finalImageUrl = (typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
+            
+            try {
+                mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
+            } catch (err) {
+                console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
+            }      
 
             if (mainSection.components && mainSection.components.length > 0) {
                 // Filter out any undefined components just in case
