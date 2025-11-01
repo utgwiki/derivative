@@ -557,9 +557,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 maxOutputTokens: 2500,
                 config: {
                     systemInstruction: sysInstr,
-                    // tools: [{
-                    //     googleSearch: {}
-                    // }],
                 },
                 history: chatHistories.get(channelId),
             });
@@ -581,6 +578,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .trim();
 
             addToHistory(channelId, "model", text, "Derivative");
+
+            // Limit to ~500 characters without cutting words
+            if (text.length > 400) {
+                const cutoff = text.slice(0, 400);
+                const lastSpace = cutoff.lastIndexOf(" ");
+                text = cutoff.slice(0, lastSpace > 0 ? lastSpace : 500).trim() + "...";
+            }
+            
             return text;
         });
     } catch (err) {
@@ -998,22 +1003,6 @@ if (linkMatches.length) {
             }
         }
 
-
-        // const buttons = [];
-        // if (pageTitles.length > 0) {
-        // for (const page of pageTitles.slice(0, 5)) {
-        // if (!page) continue;
-        // const pageUrl = `https://fischipedia.org/wiki/${encodeURIComponent(page.replace(/ /g, "_"))}`;
-        // try {
-        // const btn = new ButtonBuilder()
-        // .setLabel(String(page).slice(0, 80))
-        // .setStyle(ButtonStyle.Link)
-        // .setURL(pageUrl);
-        // buttons.push(btn);
-        // } catch (err) { console.warn("Skipping a problematic button:", err); }
-        // }
-        // }
-
         // 7. -------------------- TRY: Components V2 (best-effort) --------------------
         let sent = false;
         try {
@@ -1026,7 +1015,8 @@ if (linkMatches.length) {
             // Thumbnail accessory
             if (typeof imageUrl === "string" && imageUrl.trim() !== "") {
                 try {
-                    mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(imageUrl));
+                    const thumbnail = new ThumbnailBuilder().setURL(imageUrl);
+                    mainSection.setThumbnailAccessory(thumbnail);
                 } catch (err) {
                     console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
                 }
