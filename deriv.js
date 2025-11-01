@@ -1014,13 +1014,13 @@ if (linkMatches.length) {
             console.log(`imageurl is ${imageUrl}`);
             
             // Thumbnail accessory
-            if (imageUrl?.trim()) {
-                try {
-                    const thumbnail = new ThumbnailBuilder().setURL(imageUrl);
-                    console.log(`thumbnailllll ${thumbnail}`);
-                    mainSection.setThumbnailAccessory(thumbnail);
-                } catch (err) {
-                    console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
+            if (imageUrl) {
+                if (typeof imageUrl === "string" && imageUrl.trim() !== "") {
+                    try {
+                        mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(imageUrl));
+                    } catch (err) {
+                        console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
+                    }
                 }
             }
 
