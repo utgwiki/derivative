@@ -557,9 +557,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 maxOutputTokens: 2500,
                 config: {
                     systemInstruction: sysInstr,
-                    // tools: [{
-                    //     googleSearch: {}
-                    // }],
                 },
                 history: chatHistories.get(channelId),
             });
@@ -581,6 +578,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .trim();
 
             addToHistory(channelId, "model", text, "Derivative");
+
+            // Limit to ~500 characters without cutting words
+            if (text.length > 400) {
+                const cutoff = text.slice(0, 400);
+                const lastSpace = cutoff.lastIndexOf(" ");
+                text = cutoff.slice(0, lastSpace > 0 ? lastSpace : 500).trim() + "...";
+            }
+            
             return text;
         });
     } catch (err) {
