@@ -75,7 +75,7 @@ If the user provides an image or image link, you must analyze it visually and cr
 For citations, do this format: "[whatever is mentioned](<https://fischipedia.org.....>)". For example, "Lorem [Ipsum Lorem Ipsum](<https://fischipedia.org/Fisch_Wiki>) Lorem Ipsum...". It must be done like this, and failure to add the correct format will result in improper formatting. Integrate it naturally into your sentences.
 If the query references a page title, bold it. Example: "What is Fisch?" → "[**Fisch**](<https://fischipedia.org...>) is..."
 You are prohibited from asking any follow up questions, persona prompting, or any character voice framing (e.g Anything else?)
-No chit-chat and no explaining what you're doing and why. DO NOT start with "Okay", or "Alright" or any preambles. Just the output and a few kaomojis, please.`;
+No chit-chat and no explaining what you're doing and why. DO NOT start with "Okay", or "Alright" or any preambles. Just the output + one kaomoji at the start, please.`;
 }
 
 // -------------------- WIKI --------------------
@@ -577,14 +577,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .replace(/\n\s*\n/g, "\n") // clean up extra blank lines
                 .trim();
 
-            addToHistory(channelId, "model", text, "Derivative");
-
             // Limit to ~500 characters without cutting words
             if (text.length > 400) {
                 const cutoff = text.slice(0, 400);
                 const lastSpace = cutoff.lastIndexOf(" ");
                 text = cutoff.slice(0, lastSpace > 0 ? lastSpace : 500).trim() + "...";
             }
+
+            addToHistory(channelId, "model", text, "Derivative");
             
             return text;
         });
@@ -869,7 +869,7 @@ async function handleUserRequest(userMsg, messageOrInteraction) {
         // C. Update userMsg if images are present (as discussed in the previous answer)
         if (imageParts.length > 0) {
             if (!userMsg.trim()) {
-                userMsg = "What is in this image, and how does it relate to Fischipedia?";
+                userMsg = "What is in this image, and how does it relate to the wiki on https://tagging.wiki?";
             } else {
                 userMsg = `Analyze the attached image(s) in the context of the following request: ${userMsg}`;
             }
@@ -946,7 +946,6 @@ if (linkMatches.length) {
         
             explicitTemplateFoundTitle = canonical;
         
-            // 👇 Add your section-aware logic HERE
             if (sectionName) {
                 explicitTemplateContent = await getSectionContent(canonical, sectionName);
             } else {
@@ -1139,8 +1138,6 @@ if (linkMatches.length) {
 
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
-
-    // --- DELETED: isDM, mentioned, isReply logic ---
 
     // Allow {{ }} or [[ ]] messages ONLY
     // If the message content does not contain a wiki link or template, return early.
