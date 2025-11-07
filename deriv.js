@@ -966,13 +966,15 @@ if (linkMatches.length) {
 
         resolved.push(canonical);
     }
-
             // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
+            const uniqueResolved = [...new Set(resolved)];
+            
             const buildWikiUrl = (foundTitle) => {
                 const [pageOnly, frag] = String(foundTitle).split("#");
                 const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
                 return `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
             };
+            
             const urls = uniqueResolved.map(buildWikiUrl);
         
             const replyOptions = { content: urls.join("\n"), allowedMentions: { repliedUser: false } };
