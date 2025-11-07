@@ -196,6 +196,7 @@ async function loadPages() {
 }
 
 // -------------------- PAGE RESOLUTION (case-insensitive + API fallback with redirects) --------------------
+// --- Updated findCanonicalTitle: capture redirect fragments and include them in the returned canonical
 async function findCanonicalTitle(input) {
     if (!input) return null;
     const raw = String(input).trim();
@@ -237,17 +238,34 @@ async function findCanonicalTitle(input) {
             const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
             if (!res.ok) continue;
             const json = await res.json();
+
             const pageids = json.query?.pageids || [];
             if (pageids.length === 0) continue;
             const page = json.query.pages[pageids[0]];
             if (!page) continue;
             if (page.missing !== undefined) continue;
-            // page exists; return canonical title (this will be the redirected target if redirects applied)
-            const canonical = page.title;
-            // update lookup for future fast resolution
-            pageLookup.set(canonical.toLowerCase(), canonical);
-            pageLookup.set(canonical.replace(/_/g, " ").toLowerCase(), canonical);
-            return canonical;
+
+            // Determine if API returned a redirect fragment (tofragment) for this lookup
+            let canonicalTitle = page.title; // e.g. "Tagging"
+            // json.query.redirects (if present) may contain a tofragment property
+            const redirects = json.query?.redirects || [];
+            let fragment = null;
+            if (redirects.length) {
+                // Prefer any redirect that has a tofragment; otherwise none
+                const rd = redirects.find(r => r.tofragment) || redirects[0];
+                if (rd?.tofragment) fragment = rd.tofragment;
+            }
+
+            // If there is a fragment, include it in the canonical like "Tagging#No Tag Back"
+            if (fragment) canonicalTitle = `${canonicalTitle}#${fragment}`;
+
+            // update lookup for future fast resolution (store both plain and fragment forms where appropriate)
+            pageLookup.set(page.title.toLowerCase(), page.title);
+            pageLookup.set(page.title.replace(/_/g, " ").toLowerCase(), page.title);
+            // also store canonical with fragment (for quick future matches using the original input)
+            pageLookup.set((canonicalTitle).toLowerCase(), canonicalTitle);
+
+            return canonicalTitle;
         }
     } catch (err) {
         console.warn("findCanonicalTitle API lookup failed:", err?.message || err);
@@ -371,25 +389,57 @@ async function getLeadSection(pageTitle) {
 }
 
 // -------------------- WIKI SYNTAX PARSING --------------------
-function parseWikiLinks(text) {
+// --- Make parseWikiLinks async and preserve section anchors when present via canonical resolution
+async function parseWikiLinks(text) {
     // Match [[Page]] or [[Page|Label]]
     const regex = /\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]/g;
-    return text.replace(regex, (match, page, label) => {
-        const display = label || page;
-        const urlPage = encodeURIComponent(page.replace(/ /g, "_"));
-        return `[**${display}**](<https://tagging.wiki/wiki/${urlPage}>)`;
-    });
+    const matches = [];
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+        matches.push({
+            index: match.index,
+            length: match[0].length,
+            page: match[1].trim(),
+            label: match[2] ? match[2].trim() : null
+        });
+    }
+
+    // Resolve each match in parallel
+    const processed = await Promise.all(matches.map(async m => {
+        const display = m.label || m.page;
+        const canonical = await findCanonicalTitle(m.page) || m.page;
+
+        let pageOnly = canonical;
+        let fragment = null;
+        if (canonical.includes("#")) {
+            [pageOnly, fragment] = canonical.split("#");
+            fragment = fragment.trim();
+        }
+
+        const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
+        const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
+        const url = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
+
+        return { index: m.index, length: m.length, replacement: `[**${display}**](${url})` };
+    }));
+
+    // Reconstruct (descending index)
+    let res = text;
+    processed.sort((a,b)=> b.index - a.index);
+    for (const { index, length, replacement } of processed) {
+        res = res.slice(0, index) + replacement + res.slice(index + length);
+    }
+    return res;
 }
 
+// resolve canonical title first and fetch section when fragment present
 async function parseTemplates(text) {
     const regex = /\{\{([^{}|]+)(?:\|([^{}]*))?\}\}/g;
     const matches = [];
     let match;
 
-    // 1. Synchronously find all matches and record their data
-    // This correctly uses the global regex flag and captures all matches' indices from the original text.
     while ((match = regex.exec(text)) !== null) {
-        // Store crucial data, including the index and original length
         matches.push({
             fullMatch: match[0],
             templateName: match[1].trim(),
@@ -399,42 +449,60 @@ async function parseTemplates(text) {
         });
     }
 
-    // 2. Process all matches asynchronously in parallel
-    // This executes all the heavy, awaited API/network calls concurrently for efficiency.
     const processedMatches = await Promise.all(matches.map(async (m) => {
         const { fullMatch, templateName, param, index, length } = m;
-        let replacement = fullMatch; // Default to original if processing fails
+        let replacement = fullMatch; // default
 
-        // Directly try to fetch the page as-is
-        let wikiText = await getLeadSection(templateName);
-        let foundTitle = templateName;
+        // Resolve canonical first (may include "#Section" fragment)
+        const canonical = await findCanonicalTitle(templateName);
+        if (!canonical) {
+            return { index, length, replacement: "I don't know." };
+        }
+
+        // If canonical includes a fragment, split it
+        let pageOnly = canonical;
+        let fragment = null;
+        if (canonical.includes("#")) {
+            [pageOnly, fragment] = canonical.split("#");
+            fragment = fragment.trim();
+        }
+
+        // Fetch section content if fragment exists, otherwise lead section
+        let wikiText = null;
+        try {
+            if (fragment) {
+                wikiText = await getSectionContent(pageOnly, fragment);
+            } else {
+                wikiText = await getLeadSection(pageOnly);
+            }
+        } catch (err) {
+            wikiText = null;
+        }
 
         if (wikiText) {
-            const link = `<https://tagging.wiki/wiki/${encodeURIComponent(templateName.replace(/ /g, "_"))}>`;
+            // Build URL: encode page path properly, append encoded fragment as anchor
+            const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
+            const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
+            const link = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
+
+            // Use the original templateName as label but show canonical context
             replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
         } else {
             replacement = "I don't know.";
         }
 
-        // Return the replacement data needed for final string reconstruction
         return { index, length, replacement };
     }));
 
-    // 3. Reconstruct the string using the results by index
+    // Reconstruct string safely (descending indices)
     let result = text;
-    
-    // Sort by index descending (largest index first) to prevent earlier replacements 
-    // from invalidating the indices of later (shorter index) replacements.
     processedMatches.sort((a, b) => b.index - a.index);
-
     for (const { index, length, replacement } of processedMatches) {
-        // Replace the exact slice of text using index and length
         result = result.slice(0, index) + replacement + result.slice(index + length);
     }
 
     return result;
 }
-
 // -------------------- GEMINI --------------------
 function extractText(result) {
     try {
@@ -567,7 +635,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             const response = await chat.sendMessage({
                 message: userContent
-            }); // <-- UPDATED HERE
+            });
             let text = response.text;
 
             text = text?.trim() || "";
@@ -900,11 +968,12 @@ if (linkMatches.length) {
     }
 
             // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
-            const uniqueResolved = [...new Set(resolved)];
-            const urls = uniqueResolved.map(foundTitle => {
-                const parts = foundTitle.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
-                return `https://tagging.wiki/wiki/${parts.join(':')}`;
-            });
+            const buildWikiUrl = (foundTitle) => {
+                const [pageOnly, frag] = String(foundTitle).split("#");
+                const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
+                return `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+            };
+            const urls = uniqueResolved.map(buildWikiUrl);
         
             const replyOptions = { content: urls.join("\n"), allowedMentions: { repliedUser: false } };
             if (isInteraction(messageOrInteraction)) {
@@ -984,7 +1053,7 @@ if (linkMatches.length) {
         );
 
         let parsedReply = await parseTemplates(reply);  // expand {{ }}
-        parsedReply = parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
+        parsedReply = await parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
 
         // 5. Prepare Media (Image)
         let imageUrl = null;
@@ -1034,7 +1103,9 @@ if (linkMatches.length) {
             // Only create button if explicitTemplateFoundTitle is defined
             if (explicitTemplateFoundTitle) {
                 try {
-                    const pageUrl = `https://tagging.wiki/${explicitTemplateFoundTitle.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_"))).join(':')}`;
+                    const [pageOnly, frag] = String(explicitTemplateFoundTitle).split("#");
+                    const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
+                    const pageUrl = `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
                     const row = new ActionRowBuilder();
                     const btn = new ButtonBuilder()
                         .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
