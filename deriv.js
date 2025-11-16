@@ -1267,12 +1267,28 @@ if (linkMatches.length) {
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
-    // Allow {{ }} or [[ ]] messages ONLY
-    // If the message content does not contain a wiki link or template, return early.
-    if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
-
     const userMsg = message.content.trim();
     if (!userMsg) return;
+
+    const isDM = !message.guild;
+    const mentioned = message.mentions.has(client.user);
+
+    let isReply = false;
+    if (message.reference) {
+        try {
+            const referenced = await message.channel.messages.fetch(message.reference.messageId);
+            isReply = referenced.author.id === client.user.id;
+        } catch {}
+    }
+
+    const hasWikiSyntax = /\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content);
+
+    // Fire only if:
+    // - DM
+    // - Mention
+    // - Reply to bot
+    // - OR message contains {{ }} or [[ ]]
+    if (!(isDM || mentioned || isReply || hasWikiSyntax)) return;
 
     await handleUserRequest(userMsg, message);
 });
