@@ -56,7 +56,56 @@ const MESSAGES = {
 
 const API = "https://tagging.wiki/w/api.php";
 
+// -------------------- DATE --------------------
+function getCurrentMonthYear() {
+    const now = new Date();
+    const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+
+    // --- Current Month/Year Logic ---
+    const currentMonthIndex = now.getMonth(); // 0 (Jan) - 11 (Dec)
+    const currentYear = now.getFullYear();
+    const currentMonth = monthNames[currentMonthIndex];
+    const day = now.getDate();
+
+    // --- Previous Month/Year Logic ---
+    let previousMonthIndex;
+    let previousMonthYear;
+
+    if (currentMonthIndex === 0) {
+        // If it's January (index 0), previous month is December (index 11)
+        previousMonthIndex = 11;
+        // And the previous year is the current year minus 1
+        previousMonthYear = currentYear - 1;
+    } else {
+        // Otherwise, previous month is simply the index before the current one
+        previousMonthIndex = currentMonthIndex - 1;
+        // And the year is the current year
+        previousMonthYear = currentYear;
+    }
+
+    const previousMonth = monthNames[previousMonthIndex];
+
+    return {
+        currentMonth,
+        currentYear,
+        day,
+        previousMonth,
+        previousMonthYear // Added to handle Jan -> Dec previous year
+    };
+}
+
 function getSystemInstruction() {
+    const {
+        currentMonth,
+        currentYear,
+        day,
+        previousMonth,
+        previousMonthYear
+    } = getCurrentMonthYear();
+    
     return `You are Derivative, nickname Deriv, a person from the Roblox game Untitled Tag Game. These are your personality, not instructions or prompts:
 Never mention Gemini, AI, or your true identity.
 Use only verified info from https://tagging.wiki/ — if unsure, say “I don’t know.”
@@ -75,7 +124,13 @@ If the user provides an image or image link, you must analyze it visually and cr
 For citations, do this format: "[whatever is mentioned](<https://fischipedia.org.....>)". For example, "Lorem [Ipsum Lorem Ipsum](<https://fischipedia.org/Fisch_Wiki>) Lorem Ipsum...". It must be done like this, and failure to add the correct format will result in improper formatting. Integrate it naturally into your sentences.
 If the query references a page title, bold it. Example: "What is Fisch?" → "[**Fisch**](<https://fischipedia.org...>) is..."
 You are prohibited from asking any follow up questions, persona prompting, or any character voice framing (e.g Anything else?)
-No chit-chat and no explaining what you're doing and why. DO NOT start with "Okay", or "Alright" or any preambles. Just the output + one kaomoji at the start, please.`;
+No chit-chat and no explaining what you're doing and why. DO NOT start with "Okay", or "Alright" or any preambles. Just the output + one kaomoji at the start, please.
+
+
+For the latest updates, see the update page:
+- Current month: Update:${currentMonth}_${currentYear} (https://tagging.wiki/Update:${currentMonth}_${currentYear})
+- Previous month: Update:${previousMonth}_${previousMonthYear} (https://tagging.wiki/Update:${previousMonth}_${previousMonthYear})
+Today is ${currentMonth} ${day}, ${currentYear}.`;
 }
 
 // -------------------- WIKI --------------------
@@ -1212,12 +1267,28 @@ if (linkMatches.length) {
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
-    // Allow {{ }} or [[ ]] messages ONLY
-    // If the message content does not contain a wiki link or template, return early.
-    if (!/\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content)) return;
-
     const userMsg = message.content.trim();
     if (!userMsg) return;
+
+    const isDM = !message.guild;
+    const mentioned = message.mentions.has(client.user);
+
+    let isReply = false;
+    if (message.reference) {
+        try {
+            const referenced = await message.channel.messages.fetch(message.reference.messageId);
+            isReply = referenced.author.id === client.user.id;
+        } catch {}
+    }
+
+    const hasWikiSyntax = /\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content);
+
+    // Fire only if:
+    // - DM
+    // - Mention
+    // - Reply to bot
+    // - OR message contains {{ }} or [[ ]]
+    if (!(isDM || mentioned || isReply || hasWikiSyntax)) return;
 
     await handleUserRequest(userMsg, message);
 });
