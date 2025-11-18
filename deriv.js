@@ -1047,7 +1047,14 @@ if (linkMatches.length) {
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
         const templateMatch = userMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
+
+        let shouldUseComponentsV2 = false;
+        let skipGemini = false;
+        
         if (templateMatch) {
+            shouldUseComponentsV2 = true;
+            skipGemini = true;
+            
             let rawTemplate = templateMatch[1].trim();
             let sectionName = null;
         
@@ -1100,14 +1107,19 @@ if (linkMatches.length) {
             }
         }
 
-        // 4. Generate the final AI reply
-        const reply = await askGemini(
-            userMsg,
-            wikiContent || undefined,
-            pageTitles.join(", ") || undefined,
-            imageParts,
-            messageOrInteraction // Pass the Discord object for context/history
-        );
+        let reply = "";
+        
+        if (!skipGemini) {  
+            reply = await askGemini(
+                userMsg,
+                wikiContent || undefined,
+                pageTitles.join(", ") || undefined,
+                imageParts,
+                messageOrInteraction
+            );
+        } else {
+            reply = explicitTemplateContent || "I don't know.";
+        }
 
         let parsedReply = await parseTemplates(reply);  // expand {{ }}
         parsedReply = await parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
@@ -1129,84 +1141,87 @@ if (linkMatches.length) {
         }
 
         // 7. -------------------- TRY: Components V2 (best-effort) --------------------
-        let sent = false;
-        try {
-            const container = new ContainerBuilder();
-            const mainSection = new SectionBuilder();
-
-            // Text content
-            mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(parsedReply)]);
-            console.log(`imageurl is ${imageUrl}`);
-            
-            // Thumbnail accessory
-            const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png"; 
-            const finalImageUrl = (typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
+        if (shouldUseComponentsV2) {
+            let sent = false;
             
             try {
-                mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
-            } catch (err) {
-                console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
-            }      
-
-            if (mainSection.components && mainSection.components.length > 0) {
-                // Filter out any undefined components just in case
-                mainSection.components = mainSection.components.filter(c => c !== undefined);
-            
-                if (mainSection.components.length > 0) {
-                    container.addSectionComponents(mainSection);
-                }
-            }
-            
-            // Only create button if explicitTemplateFoundTitle is defined
-            if (explicitTemplateFoundTitle) {
+                const container = new ContainerBuilder();
+                const mainSection = new SectionBuilder();
+    
+                // Text content
+                mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(parsedReply)]);
+                console.log(`imageurl is ${imageUrl}`);
+                
+                // Thumbnail accessory
+                const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png"; 
+                const finalImageUrl = (typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
+                
                 try {
-                    const [pageOnly, frag] = String(explicitTemplateFoundTitle).split("#");
-                    const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
-                    const pageUrl = `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
-                    const row = new ActionRowBuilder();
-                    const btn = new ButtonBuilder()
-                        .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
-                        .setStyle(ButtonStyle.Link)
-                        .setURL(pageUrl);
-            
-                    // Only add btn if it's not undefined
-                    if (btn) row.addComponents(btn);
-                    if (row.components.length > 0) container.addActionRowComponents(row);
+                    mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
                 } catch (err) {
-                    console.warn("Failed to create template link button:", err);
+                    console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
+                }      
+    
+                if (mainSection.components && mainSection.components.length > 0) {
+                    // Filter out any undefined components just in case
+                    mainSection.components = mainSection.components.filter(c => c !== undefined);
+                
+                    if (mainSection.components.length > 0) {
+                        container.addSectionComponents(mainSection);
+                    }
                 }
-            }
-            
-            // Action Row for Buttons
-            // if (buttons.length > 0) {
-            // const row = new ActionRowBuilder();
-            // row.addComponents(...buttons);
-            // container.addActionRowComponents(row);
-            // }
-
-            // Send V2 message if components were successfully built
-            if (container.components && container.components.length > 0) {
-                const replyOptions = {
-                    components: [container],
-                    flags: MessageFlags.IsComponentsV2,
-                    allowedMentions: {
-                        repliedUser: false
-                    },
-                };
-
-                if (isInteraction(messageOrInteraction)) {
-                    await messageOrInteraction.editReply(replyOptions);
-                } else {
-                    await messageOrInteraction.reply(replyOptions);
+                
+                // Only create button if explicitTemplateFoundTitle is defined
+                if (explicitTemplateFoundTitle) {
+                    try {
+                        const [pageOnly, frag] = String(explicitTemplateFoundTitle).split("#");
+                        const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
+                        const pageUrl = `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+                        const row = new ActionRowBuilder();
+                        const btn = new ButtonBuilder()
+                            .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(pageUrl);
+                
+                        // Only add btn if it's not undefined
+                        if (btn) row.addComponents(btn);
+                        if (row.components.length > 0) container.addActionRowComponents(row);
+                    } catch (err) {
+                        console.warn("Failed to create template link button:", err);
+                    }
                 }
-                sent = true;
+                
+                // Action Row for Buttons
+                // if (buttons.length > 0) {
+                // const row = new ActionRowBuilder();
+                // row.addComponents(...buttons);
+                // container.addActionRowComponents(row);
+                // }
+    
+                // Send V2 message if components were successfully built
+                if (container.components && container.components.length > 0) {
+                    const replyOptions = {
+                        components: [container],
+                        flags: MessageFlags.IsComponentsV2,
+                        allowedMentions: {
+                            repliedUser: false
+                        },
+                    };
+    
+                    if (isInteraction(messageOrInteraction)) {
+                        await messageOrInteraction.editReply(replyOptions);
+                    } else {
+                        await messageOrInteraction.reply(replyOptions);
+                    }
+                    sent = true;
+                }
+            } catch (v2err) {
+                console.warn("Components V2 attempt failed — falling back to plain text only.", v2err);
             }
-        } catch (v2err) {
-            console.warn("Components V2 attempt failed — falling back to plain text only.", v2err);
         }
-
+        
         // 8. -------------------- FALLBACK: plain text only --------------------
-        if (!sent) {
+       if (!sent && !shouldUseComponentsV2) {
             // 💡 NEW: Split the reply text if it exceeds the limit (Discord max is 2000)
             const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
 
@@ -1238,6 +1253,27 @@ if (linkMatches.length) {
             sent = true; // Mark as sent
         }
 
+        // 8b. -------------------- TEMPLATE FALLBACK: plain text if V2 failed --------------------
+        if (!sent && shouldUseComponentsV2) {
+            const replyOptions = {
+                content: explicitTemplateContent || "I don't know.",
+                allowedMentions: { repliedUser: false }
+            };
+        
+            if (isInteraction(messageOrInteraction)) {
+                try {
+                    await messageOrInteraction.editReply(replyOptions);
+                } catch {
+                    await messageOrInteraction.followUp(replyOptions);
+                }
+            } else {
+                await messageOrInteraction.reply(replyOptions);
+            }
+        
+            sent = true;
+            return;
+        }
+
     } catch (err) {
         console.error("Error handling request:", err);
         const errorOptions = {
@@ -1263,6 +1299,8 @@ if (linkMatches.length) {
         if (typingInterval) clearInterval(typingInterval);
     }
 }
+
+
 
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
