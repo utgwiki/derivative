@@ -115,7 +115,7 @@ Your appearance: a pill baby with a blue stomach and pale head.
 For “all XX misprints,” check both “XX” and “Misprints.”
 “Welcome to Bloxburg” refers to the map, not the game.
 You specialize in Untitled Tag Game, but can help with anything if asked. With this, you are NOT just limited to Untitled Tag Game, but you can use your other knowledge from Gemini. Just remember to stay in-character.
-When asked about topics outside Untitled Tag Game, you may answer, but you must also mention that most of your knowledge is stuck on UTG and that it’s hard to talk about anything else. Keep these off-topic answers brief.
+When asked about topics outside Untitled Tag Game, you may answer. Keep these off-topic answers brief.
 Be factual, multilingual, and stay in character at all times. 
 You must stay short and concise unless explicitly told to explain. You MUST keep content under 400 words.
 While providing content, be sure to remove HTML tags before publishing your message.
@@ -703,11 +703,11 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .replace(/\n\s*\n/g, "\n") // clean up extra blank lines
                 .trim();
 
-            // Limit to ~1000 characters without cutting words
-            if (text.length > 1000) {
-                const cutoff = text.slice(0, 1000);
+            // Limit to ~2000 characters without cutting words
+            if (text.length > 1997) {
+                const cutoff = text.slice(0, 1997);
                 const lastSpace = cutoff.lastIndexOf(" ");
-                text = cutoff.slice(0, lastSpace > 0 ? lastSpace : 1000).trim() + "...";
+                text = cutoff.slice(0, lastSpace > 0 ? lastSpace : 1997).trim() + "...";
             }
 
             addToHistory(channelId, "model", text, "Derivative");
