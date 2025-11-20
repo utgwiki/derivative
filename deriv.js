@@ -663,32 +663,37 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
-function safeSend(ctx, text) {
+function safeSend(ctx, payload) {
     if (!ctx) return;
 
     try {
         // Interaction (slash, context menu, modal)
         if (typeof ctx.reply === "function") {
-            // If the interaction was deferred, the correct thing is to edit the deferred reply
-            // (not followUp). If already replied (not deferred), use followUp.
+
+            // If payload is a string, convert it to a payload object
+            const data = typeof payload === "string" ? { content: payload } : payload;
+
             if (ctx.deferred) {
-                // editReply is the correct method after deferReply()
                 if (typeof ctx.editReply === "function") {
-                    return ctx.editReply({ content: text });
+                    return ctx.editReply(data);
                 }
-                // fallback: followUp if editReply isn't available
-                return ctx.followUp ? ctx.followUp({ content: text }) : ctx.reply({ content: text });
+                return ctx.followUp ? ctx.followUp(data) : ctx.reply(data);
             }
+
             if (ctx.replied) {
-                return ctx.followUp({ content: text });
+                return ctx.followUp(data);
             }
-            // default: fresh reply
-            return ctx.reply({ content: text });
+
+            return ctx.reply(data);
         }
 
-        // Standard Message object
+        // Message object
         if (ctx.channel && typeof ctx.channel.send === "function") {
-            return ctx.channel.send(text);
+            if (typeof payload === "string") {
+                return ctx.channel.send(payload);
+            } else {
+                return ctx.channel.send(payload);
+            }
         }
 
         console.error("safeSend: No valid channel context.");
