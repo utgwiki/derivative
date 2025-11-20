@@ -48,15 +48,31 @@ async function getGeminiClient(apiKey) {
     });
 }
 
-// memory setup
+const chatHistories = new Map();
+
+function loadChatHistoriesFromJson() {
+    for (const channelId of Object.keys(memory)) {
+        const entries = memory[channelId];
+
+        chatHistories.set(
+            channelId,
+            entries.map(entry => ({
+                role: entry.memberName === "BOT" ? "assistant" : "user",
+                parts: [
+                    {
+                        text: `[${entry.memberName}] ${entry.message}`
+                    }
+                ]
+            }))
+        );
+    }
+}
+
+// Load JSON memory first
 loadMemory();
 
-for (const channelId of Object.keys(memory)) {
-    chatHistories.set(channelId, memory[channelId].map(entry => ({
-        role: entry.memberName === "BOT" ? "assistant" : "user",
-        parts: [{ text: `[${entry.memberName}] ${entry.message}` }]
-    })));
-}
+// Convert JSON memory → chatHistories
+loadChatHistoriesFromJson();
 
 // -------------------- CONFIG --------------------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -626,31 +642,28 @@ If none are relevant, return "NONE".`;
 }
 
 // -------------------- CHAT MEMORY --------------------
-const chatHistories = new Map();
-
 function addToHistory(channelId, role, text, username = null) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
-    // Prefix for AI-readable memory
     const prefix = username
         ? `[${role}: ${username}]`
         : `[${role}]`;
 
     const fullText = `${prefix} ${text}`;
 
-    // Store in in-memory history map
+    // Add to AI chat memory
     history.push({
         role,
         parts: [{ text: fullText }]
     });
 
-    // Keep last 30
     if (history.length > 30) {
         history.splice(0, history.length - 30);
     }
 
-    const nameForJson = username || role.toUpperCase();
+    // Save to JSON persistent memory
+    const nameForJson = username || (role === "assistant" ? "BOT" : "USER");
     logMessage(channelId, nameForJson, text);
 }
 
