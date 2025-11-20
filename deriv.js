@@ -1,6 +1,11 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
 const { MAIN_KEYS } = require("./geminikey.js");
-const { loadMemory, logMessage } = require("./memory.js");
+const {
+    loadMemory,
+    saveMemory,
+    logMessage,
+    memory
+} = require("./messageMemory.js");
 
 require("dotenv").config();
 const {
