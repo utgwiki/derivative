@@ -1,11 +1,7 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
 const { MAIN_KEYS } = require("./geminikey.js");
-const {
-    loadMemory,
-    saveMemory,
-    logMessage,
-    memory
-} = require("./memory.js");
+const { loadMemory, logMessage } = require("./memory.js");
+loadMemory();
 
 require("dotenv").config();
 const {
@@ -47,34 +43,6 @@ async function getGeminiClient(apiKey) {
         apiKey
     });
 }
-
-const chatHistories = new Map();
-
-function loadChatHistoriesFromJson() {
-    for (const channelId of Object.keys(memory)) {
-        const entries = memory[channelId];
-
-        chatHistories.set(
-            channelId,
-            entries.map(entry => ({
-                role: entry.memberName === "BOT" ? "assistant" : "user",
-                parts: [
-                    {
-                        text: `[${entry.memberName}] ${entry.message}`
-                    }
-                ]
-            }))
-        );
-    }
-}
-
-// Load JSON memory first
-loadMemory();
-console.log("memory loaded:", memory);
-
-// Convert JSON memory → chatHistories
-loadChatHistoriesFromJson();
-console.log("JSON keys:", Object.keys(memory));
 
 // -------------------- CONFIG --------------------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -644,28 +612,31 @@ If none are relevant, return "NONE".`;
 }
 
 // -------------------- CHAT MEMORY --------------------
+const chatHistories = new Map();
+
 function addToHistory(channelId, role, text, username = null) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
+    // Prefix for AI-readable memory
     const prefix = username
         ? `[${role}: ${username}]`
         : `[${role}]`;
 
     const fullText = `${prefix} ${text}`;
 
-    // Add to AI chat memory
+    // Store in in-memory history map
     history.push({
         role,
         parts: [{ text: fullText }]
     });
 
+    // Keep last 30
     if (history.length > 30) {
         history.splice(0, history.length - 30);
     }
 
-    // Save to JSON persistent memory
-    const nameForJson = username || (role === "assistant" ? "BOT" : "USER");
+    const nameForJson = username || role.toUpperCase();
     logMessage(channelId, nameForJson, text);
 }
 
@@ -750,7 +721,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     // add user input with Discord username
-    // addToHistory(channelId, "user", userInput, message?.author?.username);
+    addToHistory(channelId, "user", userInput, message?.author?.username);
 
     try {
         return await runWithMainKeys(async (gemini) => {
@@ -1438,7 +1409,7 @@ client.on("messageCreate", async (message) => {
         message.member?.displayName || message.author.username,
         message.content
     );
-    
+
     const userMsg = message.content.trim();
     if (!userMsg) return;
 
