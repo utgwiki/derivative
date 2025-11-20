@@ -1,6 +1,6 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
 const { MAIN_KEYS } = require("./geminikey.js");
-const { loadMemory, logMessage } = require("./memory.js");
+const { loadMemory, logMessage, memory: persistedMemory } = require("./memory.js");
 loadMemory();
 
 require("dotenv").config();
@@ -614,6 +614,30 @@ If none are relevant, return "NONE".`;
 // -------------------- CHAT MEMORY --------------------
 const chatHistories = new Map();
 
+// 💡 Initialize chatHistories from the persistedMemory object loaded from disk
+// Convert the simple log format into the Gemini history format upon startup.
+for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
+    // historyArray is an array of { memberName: '...', message: '...' } objects
+    const geminiHistory = historyArray.map(log => {
+        // Determine role: use 'user' unless memberName is explicitly 'Derivative'
+        const role = log.memberName.toLowerCase() === 'derivative' ? 'model' : 'user';
+        
+        // Reconstruct the prefixed text as expected by the system instruction
+        const username = role === 'user' ? log.memberName : null;
+        const prefix = username 
+            ? `[${role}: ${username}]`
+            : `[${role}]`;
+
+        const fullText = `${prefix} ${log.message}`;
+
+        return {
+            role,
+            parts: [{ text: fullText }]
+        };
+    });
+    chatHistories.set(channelId, geminiHistory);
+}
+
 function addToHistory(channelId, role, text, username = null) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
@@ -625,7 +649,7 @@ function addToHistory(channelId, role, text, username = null) {
 
     const fullText = `${prefix} ${text}`;
 
-    // Store in in-memory history map
+    // Store in in-memory history map (for immediate use by Gemini)
     history.push({
         role,
         parts: [{ text: fullText }]
@@ -636,6 +660,7 @@ function addToHistory(channelId, role, text, username = null) {
         history.splice(0, history.length - 30);
     }
 
+    // Persist to disk via logMessage (from memory.js)
     const nameForJson = username || role.toUpperCase();
     logMessage(channelId, nameForJson, text);
 }
@@ -1305,18 +1330,30 @@ if (linkMatches.length) {
             // If Gemini returned tagged chunks, send them individually with delay
             if (botUsedTags) {
         
-                const channel = message.channel; 
-        
+                const channel = messageOrInteraction.channel; // Use channel from interaction/message
+                const replyOptions = { allowedMentions: { repliedUser: false } };
+                
                 (async () => {
+                    // 1. Send the first chunk using the original reply/edit method
+                    const firstChunk = botTaggedChunks.shift();
+                    if (firstChunk) {
+                        if (isInteraction(messageOrInteraction)) {
+                            await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
+                        } else {
+                            // Message-based reply
+                            await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
+                        }
+                    }
+        
+                    // 2. Send the rest as follow-ups/channel sends with a delay
                     for (const chunk of botTaggedChunks) {
                         const delay = 1000 + Math.floor(Math.random() * 2000);
                         await new Promise(r => setTimeout(r, delay));
                 
-                        // Use safeSend so this works for interactions or messages.
-                        await safeSend(messageOrInteraction, {
-                            content: chunk,
-                            allowedMentions: { repliedUser: false }
-                        });
+                        // For subsequent chunks, use channel.send (as requested)
+                        if (channel && typeof channel.send === "function") {
+                             await channel.send({ ...replyOptions, content: chunk });
+                        }
                     }
                 })();
         
