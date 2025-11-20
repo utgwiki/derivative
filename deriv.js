@@ -128,7 +128,8 @@ If the query references a page title, bold it. Example: "What is Fisch?" → "[*
 Keep sentences human messaging length, aka keep it immensely short. If not told to tell things in specific detail, don't.
 If asked a question that is in regards to you and your personality, answer them instead of telling wiki info. Remember, you are a character, and you shouldn't sound like a machine.
 No chit-chat and no explaining what you're doing and why. DO NOT start with "Okay", or "Alright" or any preambles. Just the output, please.
-
+You type in lowercase, but you capitalise official terms like Untitled Tag Game for example.
+Split your messages with [START_MESSAGE] and [END_MESSAGE] like how a human would type. For example, if a message is long, then do [START_MESSAGE]Lorem Ipsum first half[END_MESSAGE][START_MESSAGE]Lorem Ipsum second half[END_MESSAGE]. Split messages like how a human would do so on social media.
 
 For the latest updates, see the update page:
 - Current month: Update:${currentMonth}_${currentYear} (https://tagging.wiki/Update:${currentMonth}_${currentYear})
@@ -780,6 +781,19 @@ function splitMessage(text, maxLength = DISCORD_MAX_LENGTH) {
     return messages.filter(msg => msg.length <= DISCORD_MAX_LENGTH);
 }
 
+function extractTaggedBotChunks(text) {
+    const out = [];
+    const re = /\[START_MESSAGE\]([\s\S]*?)\[END_MESSAGE\]/gi;
+
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const cleaned = m[1].trim();
+        if (cleaned.length > 0) out.push(cleaned);
+    }
+
+    return out;
+}
+
 // Function to convert a remote URL (like a Discord attachment) into a GenerativePart object
 async function urlToGenerativePart(url) {
     try {
@@ -1134,6 +1148,10 @@ if (linkMatches.length) {
         let parsedReply = await parseTemplates(reply);  // expand {{ }}
         parsedReply = await parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
 
+        // If Gemini used [START_MESSAGE], then we split on those
+        const botTaggedChunks = extractTaggedBotChunks(parsedReply);
+        const botUsedTags = botTaggedChunks.length > 0;
+
         // 5. Prepare Media (Image)
         let imageUrl = null;
         if (pageTitles.length > 0) {
@@ -1230,9 +1248,25 @@ if (linkMatches.length) {
             }
         }
         
-        // 8. -------------------- FALLBACK: plain text only --------------------
        if (!sent && !shouldUseComponentsV2) {
-            // 💡 NEW: Split the reply text if it exceeds the limit (Discord max is 2000)
+            // If Gemini returned tagged chunks, send them individually with delay
+            if (botUsedTags) {
+                (async () => {
+                    for (const chunk of botTaggedChunks) {
+                        const delay = 1000 + Math.floor(Math.random() * 2000);
+                        await new Promise(r => setTimeout(r, delay));
+            
+                        await message.channel.send({
+                            content: chunk,
+                            allowedMentions: { repliedUser: false }
+                        });
+                    }
+                })();
+            
+                return; // Stop the normal output path
+            }
+
+            // Split the reply text if it exceeds the limit (Discord max is 2000)
             const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
 
             // Send each part sequentially
