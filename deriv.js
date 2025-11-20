@@ -746,7 +746,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     // add user input with Discord username
-    addToHistory(channelId, "user", userInput, message?.author?.username);
+    // addToHistory(channelId, "user", userInput, message?.author?.username);
 
     try {
         return await runWithMainKeys(async (gemini) => {
@@ -1443,7 +1443,7 @@ client.on("messageCreate", async (message) => {
 
     logMessage(
         message.channel.id,
-        message.member?.displayName || message.author.username,
+        message.author.username,
         message.content
     );
 
