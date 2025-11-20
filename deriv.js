@@ -1,7 +1,6 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
 const { MAIN_KEYS } = require("./geminikey.js");
 const { loadMemory, logMessage } = require("./memory.js");
-loadMemory();
 
 require("dotenv").config();
 const {
@@ -42,6 +41,16 @@ async function getGeminiClient(apiKey) {
     return new GoogleGenAI({
         apiKey
     });
+}
+
+// memory setup
+loadMemory();
+
+for (const channelId of Object.keys(memory)) {
+    chatHistories.set(channelId, memory[channelId].map(entry => ({
+        role: entry.memberName === "BOT" ? "assistant" : "user",
+        parts: [{ text: `[${entry.memberName}] ${entry.message}` }]
+    })));
 }
 
 // -------------------- CONFIG --------------------
