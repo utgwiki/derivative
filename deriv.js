@@ -1,7 +1,7 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
-const {
-    MAIN_KEYS
-} = require("./geminikey.js");
+const { MAIN_KEYS } = require("./geminikey.js");
+const { loadMemory, logMessage } = require("./memory.js");
+loadMemory();
 
 require("dotenv").config();
 const {
@@ -663,6 +663,40 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
+function safeSend(ctx, text) {
+    if (!ctx) return;
+
+    try {
+        // Interaction (slash, context menu, modal)
+        if (typeof ctx.reply === "function") {
+            // If the interaction was deferred, the correct thing is to edit the deferred reply
+            // (not followUp). If already replied (not deferred), use followUp.
+            if (ctx.deferred) {
+                // editReply is the correct method after deferReply()
+                if (typeof ctx.editReply === "function") {
+                    return ctx.editReply({ content: text });
+                }
+                // fallback: followUp if editReply isn't available
+                return ctx.followUp ? ctx.followUp({ content: text }) : ctx.reply({ content: text });
+            }
+            if (ctx.replied) {
+                return ctx.followUp({ content: text });
+            }
+            // default: fresh reply
+            return ctx.reply({ content: text });
+        }
+
+        // Standard Message object
+        if (ctx.channel && typeof ctx.channel.send === "function") {
+            return ctx.channel.send(text);
+        }
+
+        console.error("safeSend: No valid channel context.");
+    } catch (err) {
+        console.error("safeSend error:", err);
+    }
+}
+
 async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
@@ -722,7 +756,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         console.error("Gemini chat error for Derivative");
         if (message?.channel) {
             try {
-                await message.channel.send(`⚠️ Gemini chat error for Derivative:\n\`\`\`${err.message || err}\`\`\``);
+                // await message.channel.send(`⚠️ Gemini chat error for Derivative:\n\`\`\`${err.message || err}\`\`\``);
             } catch (sendErr) {
                 console.error("Failed to send error message:", sendErr);
             }
@@ -854,6 +888,10 @@ const STATUS_OPTIONS = [{
     {
         type: ActivityType.Custom,
         text: "just send {{a page}} and i'll appear!"
+    },
+    {
+        type: ActivityType.Custom,
+        text: "dms are open!"
     },
     {
         type: ActivityType.Custom,
@@ -1261,8 +1299,9 @@ if (linkMatches.length) {
                     for (const chunk of botTaggedChunks) {
                         const delay = 1000 + Math.floor(Math.random() * 2000);
                         await new Promise(r => setTimeout(r, delay));
-        
-                        await channel.send({
+                
+                        // Use safeSend so this works for interactions or messages.
+                        await safeSend(messageOrInteraction, {
                             content: chunk,
                             allowedMentions: { repliedUser: false }
                         });
@@ -1350,10 +1389,14 @@ if (linkMatches.length) {
     }
 }
 
-
-
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
+
+    logMessage(
+        message.channel.id,
+        message.member?.displayName || message.author.username,
+        message.content
+    );
 
     const userMsg = message.content.trim();
     if (!userMsg) return;
@@ -1385,6 +1428,12 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isMessageContextMenuCommand()) return;
     if (interaction.commandName !== "Ask Derivative...") return;
 
+    logMessage(
+        interaction.channelId,
+        interaction.user.username,
+        interaction.targetMessage?.content || "[No content]"
+    );
+    
     const modal = new ModalBuilder()
         .setCustomId("deriv_modal")
         .setTitle("Ask Derivative");
@@ -1427,6 +1476,12 @@ client.on("interactionCreate", async (interaction) => {
 
     const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
 
+    logMessage(
+        interaction.channelId,
+        interaction.user.username,
+        userPrompt
+    );
+    
     const isPrivateChannel = interaction.channel &&
     (interaction.channel.type === ChannelType.DM ||
      interaction.channel.type === ChannelType.GroupDM);
