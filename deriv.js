@@ -1251,21 +1251,24 @@ if (linkMatches.length) {
             }
         }
         
-       if (!sent && !shouldUseComponentsV2) {
+        if (!sent && !shouldUseComponentsV2) {
             // If Gemini returned tagged chunks, send them individually with delay
             if (botUsedTags) {
+        
+                const channel = message.channel; 
+        
                 (async () => {
                     for (const chunk of botTaggedChunks) {
                         const delay = 1000 + Math.floor(Math.random() * 2000);
                         await new Promise(r => setTimeout(r, delay));
-            
-                        await message.channel.send({
+        
+                        await channel.send({
                             content: chunk,
                             allowedMentions: { repliedUser: false }
                         });
                     }
                 })();
-            
+        
                 return; // Stop the normal output path
             }
 
