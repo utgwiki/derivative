@@ -5,7 +5,7 @@ const {
     saveMemory,
     logMessage,
     memory
-} = require("./messageMemory.js");
+} = require("./memory.js");
 
 require("dotenv").config();
 const {
