@@ -70,10 +70,11 @@ function loadChatHistoriesFromJson() {
 
 // Load JSON memory first
 loadMemory();
+console.log("memory loaded:", memory);
 
 // Convert JSON memory → chatHistories
 loadChatHistoriesFromJson();
-console.log(chatHistories);
+console.log("JSON keys:", Object.keys(memory));
 
 // -------------------- CONFIG --------------------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -749,7 +750,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     // add user input with Discord username
-    addToHistory(channelId, "user", userInput, message?.author?.username);
+    // addToHistory(channelId, "user", userInput, message?.author?.username);
 
     try {
         return await runWithMainKeys(async (gemini) => {
