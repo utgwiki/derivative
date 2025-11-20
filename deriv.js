@@ -720,7 +720,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     // add user input with Discord username
-    addToHistory(channelId, "user", userInput, message?.author?.username);
+    // addToHistory(channelId, "user", userInput, message?.author?.username);
 
     try {
         return await runWithMainKeys(async (gemini) => {
@@ -1403,6 +1403,12 @@ if (linkMatches.length) {
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
+    logMessage(
+        message.channel.id,
+        message.member?.displayName || message.author.username,
+        message.content
+    );
+    
     const userMsg = message.content.trim();
     if (!userMsg) return;
 
@@ -1432,6 +1438,12 @@ client.on("messageCreate", async (message) => {
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isMessageContextMenuCommand()) return;
     if (interaction.commandName !== "Ask Derivative...") return;
+
+    logMessage(
+        interaction.channelId,
+        interaction.user.username,
+        interaction.targetMessage?.content || "[No content]"
+    );
     
     const modal = new ModalBuilder()
         .setCustomId("deriv_modal")
