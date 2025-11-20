@@ -1,7 +1,7 @@
 // deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
-const {
-    MAIN_KEYS
-} = require("./geminikey.js");
+const { MAIN_KEYS } = require("./geminikey.js");
+const { loadMemory, logMessage } = require("./memory.js");
+loadMemory();
 
 require("dotenv").config();
 const {
@@ -663,6 +663,25 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
+function safeSend(ctx, text) {
+    if (!ctx) return;
+
+    // interaction
+    if (ctx.reply) {
+        if (ctx.deferred || ctx.replied) {
+            return ctx.followUp({ content: text });
+        }
+        return ctx.reply({ content: text });
+    }
+
+    // normal message
+    if (ctx.channel?.send) {
+        return ctx.channel.send(text);
+    }
+
+    console.error("safeSend: No valid channel context.");
+}
+
 async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
@@ -722,7 +741,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         console.error("Gemini chat error for Derivative");
         if (message?.channel) {
             try {
-                await message.channel.send(`⚠️ Gemini chat error for Derivative:\n\`\`\`${err.message || err}\`\`\``);
+                // await message.channel.send(`⚠️ Gemini chat error for Derivative:\n\`\`\`${err.message || err}\`\`\``);
             } catch (sendErr) {
                 console.error("Failed to send error message:", sendErr);
             }
@@ -1296,7 +1315,7 @@ if (linkMatches.length) {
                     if (isInteraction(messageOrInteraction)) {
                         await messageOrInteraction.followUp(fallbackOptions);
                     } else {
-                        await messageOrInteraction.channel.send(fallbackOptions);
+                        safeSend(messageOrInteraction, fallbackOptions.content || fallbackOptions);
                     }
                 }
             }
@@ -1350,10 +1369,14 @@ if (linkMatches.length) {
     }
 }
 
-
-
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
+
+    logMessage(
+        message.channel.id,
+        message.member?.displayName || message.author.username,
+        message.content
+    );
 
     const userMsg = message.content.trim();
     if (!userMsg) return;
@@ -1385,6 +1408,12 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isMessageContextMenuCommand()) return;
     if (interaction.commandName !== "Ask Derivative...") return;
 
+    logMessage(
+        interaction.channelId,
+        interaction.user.username,
+        interaction.targetMessage?.content || "[No content]"
+    );
+    
     const modal = new ModalBuilder()
         .setCustomId("deriv_modal")
         .setTitle("Ask Derivative");
@@ -1427,6 +1456,12 @@ client.on("interactionCreate", async (interaction) => {
 
     const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
 
+    logMessage(
+        interaction.channelId,
+        interaction.user.username,
+        userPrompt
+    );
+    
     const isPrivateChannel = interaction.channel &&
     (interaction.channel.type === ChannelType.DM ||
      interaction.channel.type === ChannelType.GroupDM);
