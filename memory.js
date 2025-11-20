@@ -28,7 +28,7 @@ function logMessage(channelId, memberName, message) {
 
     // keep only last 10
     if (memory[channelId].length > 30) {
-        memory[channelId] = memory[channelId].slice(-10);
+        memory[channelId] = memory[channelId].slice(-30);
     }
 
     saveMemory();
