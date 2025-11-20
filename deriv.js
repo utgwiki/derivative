@@ -666,20 +666,35 @@ async function runWithMainKeys(fn) {
 function safeSend(ctx, text) {
     if (!ctx) return;
 
-    // interaction
-    if (ctx.reply) {
-        if (ctx.deferred || ctx.replied) {
-            return ctx.followUp({ content: text });
+    try {
+        // Interaction (slash, context menu, modal)
+        if (typeof ctx.reply === "function") {
+            // If the interaction was deferred, the correct thing is to edit the deferred reply
+            // (not followUp). If already replied (not deferred), use followUp.
+            if (ctx.deferred) {
+                // editReply is the correct method after deferReply()
+                if (typeof ctx.editReply === "function") {
+                    return ctx.editReply({ content: text });
+                }
+                // fallback: followUp if editReply isn't available
+                return ctx.followUp ? ctx.followUp({ content: text }) : ctx.reply({ content: text });
+            }
+            if (ctx.replied) {
+                return ctx.followUp({ content: text });
+            }
+            // default: fresh reply
+            return ctx.reply({ content: text });
         }
-        return ctx.reply({ content: text });
-    }
 
-    // normal message
-    if (ctx.channel?.send) {
-        return ctx.channel.send(text);
-    }
+        // Standard Message object
+        if (ctx.channel && typeof ctx.channel.send === "function") {
+            return ctx.channel.send(text);
+        }
 
-    console.error("safeSend: No valid channel context.");
+        console.error("safeSend: No valid channel context.");
+    } catch (err) {
+        console.error("safeSend error:", err);
+    }
 }
 
 async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null) {
@@ -873,6 +888,10 @@ const STATUS_OPTIONS = [{
     {
         type: ActivityType.Custom,
         text: "just send {{a page}} and i'll appear!"
+    },
+    {
+        type: ActivityType.Custom,
+        text: "dms are open!"
     },
     {
         type: ActivityType.Custom,
@@ -1280,8 +1299,9 @@ if (linkMatches.length) {
                     for (const chunk of botTaggedChunks) {
                         const delay = 1000 + Math.floor(Math.random() * 2000);
                         await new Promise(r => setTimeout(r, delay));
-        
-                        await channel.send({
+                
+                        // Use safeSend so this works for interactions or messages.
+                        await safeSend(messageOrInteraction, {
                             content: chunk,
                             allowedMentions: { repliedUser: false }
                         });
@@ -1315,7 +1335,7 @@ if (linkMatches.length) {
                     if (isInteraction(messageOrInteraction)) {
                         await messageOrInteraction.followUp(fallbackOptions);
                     } else {
-                        safeSend(messageOrInteraction, fallbackOptions.content || fallbackOptions);
+                        await messageOrInteraction.channel.send(fallbackOptions);
                     }
                 }
             }
