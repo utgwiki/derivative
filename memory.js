@@ -17,7 +17,7 @@ function saveMemory() {
     fs.writeFileSync(path, JSON.stringify(memory, null, 2));
 }
 
-// Add a logged message (while keeping only last 10)
+// Add a logged message (while keeping only last 30)
 function logMessage(channelId, memberName, message) {
     if (!memory[channelId]) memory[channelId] = [];
 
@@ -27,7 +27,7 @@ function logMessage(channelId, memberName, message) {
     });
 
     // keep only last 10
-    if (memory[channelId].length > 10) {
+    if (memory[channelId].length > 30) {
         memory[channelId] = memory[channelId].slice(-10);
     }
 
