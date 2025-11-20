@@ -617,20 +617,26 @@ function addToHistory(channelId, role, text, username = null) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
-    const prefix = username ?
-        `[HISTORY: ${role} "${username}"]` :
-        `[HISTORY: ${role}]`;
+    // Prefix for AI-readable memory
+    const prefix = username
+        ? `[${role}: ${username}]`
+        : `[${role}]`;
 
+    const fullText = `${prefix} ${text}`;
+
+    // Store in in-memory history map
     history.push({
         role,
-        parts: [{
-            text: `${prefix}: ${text}`
-        }]
+        parts: [{ text: fullText }]
     });
 
+    // Keep last 30
     if (history.length > 30) {
         history.splice(0, history.length - 30);
     }
+
+    const nameForJson = username || role.toUpperCase();
+    logMessage(channelId, nameForJson, text);
 }
 
 // -------------------- GEMINI CHAT with backup keys --------------------
