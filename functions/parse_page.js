@@ -9,24 +9,29 @@ function stripHtmlPreservingLinks(html) {
     if (!html) return "";
     let text = html;
 
-    // 1. 🔥 FORCE REMOVE CSS styles, JS scripts, and Comments entirely
-    // [\s\S]*? ensures we match newlines inside the tags
+    // 1. Remove style, script, and comments
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
     text = text.replace(//g, "");
 
-    // 2. Convert <a href="...">Label</a> to [Label](<URL>)
-    text = text.replace(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, label) => {
-        if (href.startsWith("/")) href = "https://tagging.wiki" + href;
+    // 2. Define the Link Regex separately to avoid syntax errors
+    // Matches: <a ... href="..."> ... </a>
+    const linkRegex = /<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi;
+
+    text = text.replace(linkRegex, (match, quote, href, label) => {
+        // Fix relative URLs
+        if (href.startsWith("/")) {
+            href = "https://tagging.wiki" + href;
+        }
         
-        // Prevent breaking markdown if label has brackets
+        // Prevent breaking markdown if label already has brackets
         if (label.includes("[") || label.includes("]")) return label;
         
         // Clean inner tags from label (e.g. <b>Link</b>)
-        const cleanLabel = label.replace(/<[^>]*>?/gm, "");
+        const cleanLabel = label.replace(/<[^>]*>?/gm, "").trim();
         
         // Handle empty labels
-        if (!cleanLabel.trim()) return "";
+        if (!cleanLabel) return "";
         
         return `[${cleanLabel}](<${href}>)`; 
     });
@@ -49,7 +54,6 @@ function stripHtmlPreservingLinks(html) {
 }
 
 // --- WIKI API FUNCTIONS ---
-// -------------------- NAMESPACES + ALL PAGES FETCH --------------------
 async function getAllNamespaces() {
     try {
         const params = new URLSearchParams({
@@ -65,7 +69,6 @@ async function getAllNamespaces() {
         const json = await res.json();
         const nsObj = json.query?.namespaces || {};
 
-        // Build list of numeric namespace ids to include (exclude talk & user namespaces)
         const includeNs = Object.entries(nsObj)
             .map(([k, v]) => {
                 const id = parseInt(k, 10);
@@ -136,7 +139,7 @@ async function loadPages() {
         console.log("Loading all wiki pages...");
 
         const newPages = await getAllPages();
-        // ✅ Fix: modify array in-place so conversation.js sees the updates
+        // Modify array in-place so conversation.js sees the updates
         knownPages.length = 0; 
         knownPages.push(...newPages);
         
@@ -161,11 +164,9 @@ async function findCanonicalTitle(input) {
     const lower = raw.toLowerCase();
     const lowerNorm = norm.toLowerCase();
 
-    // direct lookup from preloaded pages
     if (pageLookup.has(lower)) return pageLookup.get(lower);
     if (pageLookup.has(lowerNorm)) return pageLookup.get(lowerNorm);
 
-    // try titlecasing namespace + words fallback
     if (norm.includes(":")) {
         const parts = norm.split(":").map((seg, i) =>
             i === 0
@@ -176,7 +177,6 @@ async function findCanonicalTitle(input) {
         if (pageLookup.has(alt.toLowerCase())) return pageLookup.get(alt.toLowerCase());
     }
 
-    // LAST RESORT: query the MediaWiki API directly
     try {
         const titleTryVariants = [
             raw,
@@ -247,7 +247,6 @@ async function getWikiContent(pageTitle) {
         const html = json.parse?.text?.["*"];
         if (!html) return null;
 
-        // ✅ Updated to use the helper that removes CSS/Style tags
         return stripHtmlPreservingLinks(html);
     } catch (err) {
         console.error(`Failed to fetch content for "${pageTitle}":`, err.message);
