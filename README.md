@@ -1,5 +1,5 @@
 ## hey, i’m Derivative! ꉂ(˵˃ ᗜ ˂˵)
-Derivative is a wiki bot built from scratch, designed specifically for handling and understanding content on the [untitled tag game wiki](https://tagging.wiki). It fetches information directly from the wiki with up to 98% accuracy, and it can keep a running memory of your last 30 messages to maintain context across conversations.
+Derivative is a wiki bot built from scratch, designed specifically for handling and understanding content on the [untitled tag game wiki](https://tagging.wiki). It fetches information directly from the wiki with up to 98% accuracy, and it can keep a running memory of the last 30 messages in servers to maintain context in different conversations.
 
 Some things that set Derivative apart include:
 * maintaining back-and-forth conversations instead of giving isolated replies
