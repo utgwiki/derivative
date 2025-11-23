@@ -115,7 +115,11 @@ async function getAllPages() {
 async function loadPages() {
     try {
         console.log("Loading all wiki pages...");
-        knownPages = await getAllPages();
+
+        const newPages = await getAllPages();
+        knownPages.length = 0; 
+        knownPages.push(...newPages);
+        
         pageLookup = new Map();
         for (const title of knownPages) {
             const canonical = title; 
