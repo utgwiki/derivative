@@ -7,15 +7,39 @@ let pageLookup = new Map();
 // --- HELPER ---
 function stripHtmlPreservingLinks(html) {
     if (!html) return "";
-    let text = html.replace(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, label) => {
+    let text = html;
+
+    // FORCE REMOVE CSS styles, JS scripts, and Comments entirely
+    // [\s\S]*? ensures we match newlines inside the tags
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+    text = text.replace(//g, "");
+
+    // 2. Convert <a href="...">Label</a> to [Label](<URL>)
+    text = text.replace(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, label) => {
         if (href.startsWith("/")) href = "https://tagging.wiki" + href;
+        
+        // Prevent breaking markdown if label has brackets
         if (label.includes("[") || label.includes("]")) return label;
+        
+        // Clean inner tags from label (e.g. <b>Link</b>)
         const cleanLabel = label.replace(/<[^>]*>?/gm, "");
         return `[${cleanLabel}](<${href}>)`; 
     });
-    text = text.replace(/<(p|div|br|li|tr)[^>]*>/gi, "\n");
+
+    // 3. Format block tags to newlines
+    text = text.replace(/<(p|div|br|li|tr|h[1-6])[^>]*>/gi, "\n");
+
+    // 4. Strip all remaining HTML tags
     text = text.replace(/<[^>]*>?/gm, "");
-    text = text.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+
+    // 5. Decode entities
+    text = text.replace(/&quot;/g, '"')
+               .replace(/&amp;/g, '&')
+               .replace(/&lt;/g, '<')
+               .replace(/&gt;/g, '>')
+               .replace(/&nbsp;/g, ' ');
+
     return text.replace(/\n\s*\n/g, "\n\n").trim();
 }
 
@@ -230,11 +254,12 @@ async function getWikiContent(pageTitle) {
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const json = await res.json();
 
-        if (json?.parse?.text?.["*"]) {
-            const html = json.parse.text["*"];
-            return html.replace(/<[^>]*>?/gm, ""); // Strip HTML
-        }
-        return null;
+        const html = json.parse?.text?.["*"];
+        if (!html) return null;
+
+        // Use the helper instead of simple regex
+        return stripHtmlPreservingLinks(html);
+        
     } catch (err) {
         console.error(`Failed to fetch content for "${pageTitle}":`, err.message);
         return null;
