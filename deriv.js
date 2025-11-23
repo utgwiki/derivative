@@ -322,14 +322,10 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         let imageParts = [];
 
         if (uniqueImageURLs.length > 0) {
-            console.log(`Processing ${uniqueImageURLs.length} image(s)...`);
-            // Concurrently convert all image URLs to GenerativeParts
+            // CALLING FUNCTION FROM image_handling.js
             const partPromises = uniqueImageURLs.map(url => urlToGenerativePart(url));
             const parts = await Promise.all(partPromises);
-
-            // Filter out any failed conversions
             imageParts = parts.filter(part => part !== null);
-            console.log(`Successfully prepared ${imageParts.length} image part(s).`);
         }
 
         // C. Update userMsg if images are present (as discussed in the previous answer)
@@ -341,29 +337,30 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
             }
         }
 
-// === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
-const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
-const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
-if (linkMatches.length) {
-    const resolved = [];
-    for (const m of linkMatches) {
-        const raw = m[1].trim();
-        const canonical = await findCanonicalTitle(raw);
-
-        if (!canonical) {
-            // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
-            const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
-            if (isInteraction(messageOrInteraction)) {
-                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-            } else {
-                await messageOrInteraction.reply(replyOptions);
+        // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
+        const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
+        const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
+        if (linkMatches.length) {
+            const resolved = [];
+            for (const m of linkMatches) {
+                const raw = m[1].trim();
+                const canonical = await findCanonicalTitle(raw);
+        
+                if (!canonical) {
+                    // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
+                    const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
+                    if (isInteraction(messageOrInteraction)) {
+                        try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
+                    } else {
+                        await messageOrInteraction.reply(replyOptions);
+                    }
+                    if (typingInterval) clearInterval(typingInterval);
+                    return;
+                }
+        
+                resolved.push(canonical);
             }
-            if (typingInterval) clearInterval(typingInterval);
-            return;
-        }
-
-        resolved.push(canonical);
-    }
+            
             // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
             const uniqueResolved = [...new Set(resolved)];
             
@@ -409,32 +406,12 @@ if (linkMatches.length) {
             }
         
             const canonical = await findCanonicalTitle(rawTemplate);
-            if (!canonical) {
-                const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
-                if (messageOrInteraction.editReply) {
-                    try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-                } else {
-                    await messageOrInteraction.reply(replyOptions);
-                }
-                if (typingInterval) clearInterval(typingInterval);
-                return;
-            }
-        
-            explicitTemplateFoundTitle = canonical;
-        
+            
             if (sectionName) {
                 explicitTemplateContent = await getSectionContent(canonical, sectionName);
             } else {
-                // use getLeadSection because support link parsing via stripHtmlPreservingLinks
-                // prop=extracts strips links on the API side, so we can't use it if we want links.
                 explicitTemplateContent = await getLeadSection(canonical);
-                
-                if (!explicitTemplateContent) {
-                    explicitTemplateContent = "No content available.";
-                }
             }
-        
-            explicitTemplateName = rawTemplate;
         }
 
         // ---- page ----
@@ -448,7 +425,7 @@ if (linkMatches.length) {
             pageTitles = await askGeminiForPages(userMsg);
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
-                    if (knownPages.includes(pageTitle)) {
+                    if (knownPages.includes(pageTitle)) { 
                         const content = await getWikiContent(pageTitle);
                         if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
                     }
@@ -470,8 +447,8 @@ if (linkMatches.length) {
             reply = explicitTemplateContent || "I don't know.";
         }
 
-        let parsedReply = await parseTemplates(reply);  // expand {{ }}
-        parsedReply = await parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
+        let parsedReply = await parseTemplates(reply);  
+        parsedReply = await parseWikiLinks(parsedReply);
 
         // If this is an ephemeral message (Ask Derivative), strip the tags and force standard splitting
         if (isEphemeral) {
