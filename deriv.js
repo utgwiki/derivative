@@ -410,8 +410,17 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
             if (sectionName) {
                 explicitTemplateContent = await getSectionContent(canonical, sectionName);
             } else {
-                explicitTemplateContent = await getLeadSection(canonical);
+                // Replace getLeadSection() with a clean extract API call
+                const extractRes = await fetch(
+                    `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
+                );
+                
+                const extractJson = await extractRes.json();
+                const pageObj = Object.values(extractJson.query.pages)[0];
+                explicitTemplateContent = pageObj.extract || "No content available.";
             }
+        
+            explicitTemplateName = rawTemplate;
         }
 
         // ---- page ----
