@@ -1023,7 +1023,7 @@ client.once("ready", async () => {
     }
 });
 
-async function handleUserRequest(userMsg, messageOrInteraction) {
+async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = false) {
     // 1. Initial validation
     if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
 
@@ -1229,9 +1229,20 @@ if (linkMatches.length) {
         let parsedReply = await parseTemplates(reply);  // expand {{ }}
         parsedReply = await parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
 
-        // If Gemini used [START_MESSAGE], then we split on those
-        const botTaggedChunks = extractTaggedBotChunks(parsedReply);
-        const botUsedTags = botTaggedChunks.length > 0;
+        // If this is an ephemeral message (Ask Derivative), strip the tags and force standard splitting
+        if (isEphemeral) {
+            // Remove the [START_MESSAGE] and [END_MESSAGE] tags globally
+            parsedReply = parsedReply.replace(/\[START_MESSAGE\]/g, "").replace(/\[END_MESSAGE\]/g, "\n\n").trim();
+        }
+
+        // If NOT ephemeral, we check for tags to do the cool delayed sending
+        let botTaggedChunks = [];
+        let botUsedTags = false;
+
+        if (!isEphemeral) {
+            botTaggedChunks = extractTaggedBotChunks(parsedReply);
+            botUsedTags = botTaggedChunks.length > 0;
+        }
 
         // 5. Prepare Media (Image)
         let imageUrl = null;
@@ -1544,7 +1555,8 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({
         ephemeral: ephemeralSetting
     });
-    await handleUserRequest(userPrompt, interaction);
+    
+    await handleUserRequest(userPrompt, interaction, ephemeralSetting);
 });
 
 client.login(DISCORD_TOKEN);
