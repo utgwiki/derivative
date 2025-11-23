@@ -195,10 +195,11 @@ async function getWikiContent(pageTitle) {
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const json = await res.json();
 
-        const html = json.parse?.text?.["*"];
-        if (!html) return null;
-
-        return stripHtmlPreservingLinks(html);
+        if (json?.parse?.text?.["*"]) {
+            const html = json.parse.text["*"];
+            return html.replace(/<[^>]*>?/gm, ""); // Strip HTML
+        }
+        return null;
     } catch (err) {
         console.error(`Failed to fetch content for "${pageTitle}":`, err.message);
         return null;
