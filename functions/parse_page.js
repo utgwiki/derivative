@@ -7,48 +7,15 @@ let pageLookup = new Map();
 // --- HELPER ---
 function stripHtmlPreservingLinks(html) {
     if (!html) return "";
-    let text = html;
-
-    // 1. Remove style, script, and comments
-    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-
-    // 2. Define the Link Regex separately to avoid syntax errors
-    // Matches: <a ... href="..."> ... </a>
-    const linkRegex = /<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi;
-
-    text = text.replace(linkRegex, (match, quote, href, label) => {
-        // Fix relative URLs
-        if (href.startsWith("/")) {
-            href = "https://tagging.wiki" + href;
-        }
-        
-        // Prevent breaking markdown if label already has brackets
+    let text = html.replace(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, label) => {
+        if (href.startsWith("/")) href = "https://tagging.wiki" + href;
         if (label.includes("[") || label.includes("]")) return label;
-        
-        // Clean inner tags from label (e.g. <b>Link</b>)
-        const cleanLabel = label.replace(/<[^>]*>?/gm, "").trim();
-        
-        // Handle empty labels
-        if (!cleanLabel) return "";
-        
+        const cleanLabel = label.replace(/<[^>]*>?/gm, "");
         return `[${cleanLabel}](<${href}>)`; 
     });
-
-    // 3. Format block tags to newlines
-    text = text.replace(/<(p|div|br|li|tr|h[1-6])[^>]*>/gi, "\n");
-
-    // 4. Strip all remaining HTML tags
+    text = text.replace(/<(p|div|br|li|tr)[^>]*>/gi, "\n");
     text = text.replace(/<[^>]*>?/gm, "");
-
-    // 5. Decode entities
-    text = text.replace(/&quot;/g, '"')
-               .replace(/&amp;/g, '&')
-               .replace(/&lt;/g, '<')
-               .replace(/&gt;/g, '>')
-               .replace(/&nbsp;/g, ' ')
-               .replace(/&#039;/g, "'");
-
+    text = text.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
     return text.replace(/\n\s*\n/g, "\n\n").trim();
 }
 
