@@ -3,7 +3,7 @@ require("dotenv").config();
 
 // --- IMPORTS ---
 const { MAIN_KEYS } = require("./geminikey.js");
-const { loadMemory } = require("./memory.js");
+const { loadMemory, logMessage, memory: persistedMemory } = require("./memory.js");
 loadMemory(); 
 
 // NEW IMPORTS FROM FUNCTIONS FOLDER
