@@ -408,9 +408,12 @@ async function getSectionContent(pageTitle, sectionName) {
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
-        prop: "text",
+        prop: "text", // fetch text (HTML) to get the links
         page: pageTitle,
-        section: sectionIndex
+        section: sectionIndex,
+        disablelimitreport: "true",
+        disableeditsection: "true",
+        disabletoc: "true"
     });
 
     try {
@@ -421,7 +424,9 @@ async function getSectionContent(pageTitle, sectionName) {
 
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-        return html.replace(/<[^>]*>?/gm, ""); // strip HTML
+        
+        // Use the new helper
+        return stripHtmlPreservingLinks(html);
     } catch (err) {
         console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
         return null;
@@ -432,9 +437,12 @@ async function getLeadSection(pageTitle) {
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
-        prop: "text",
+        prop: "text", // Fetch HTML
         page: pageTitle,
-        section: "0"
+        section: "0", // Lead section
+        disablelimitreport: "true",
+        disableeditsection: "true",
+        disabletoc: "true"
     });
 
     try {
@@ -444,7 +452,9 @@ async function getLeadSection(pageTitle) {
         const json = await res.json();
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-        return html.replace(/<[^>]*>?/gm, ""); // Strip HTML
+
+        // Use the new helper
+        return stripHtmlPreservingLinks(html);
     } catch (err) {
         console.error(`Failed to fetch lead section for "${pageTitle}":`, err.message);
         return null;
@@ -566,6 +576,49 @@ async function parseTemplates(text) {
 
     return result;
 }
+
+// Helper to convert HTML to text while preserving links
+function stripHtmlPreservingLinks(html) {
+    if (!html) return "";
+
+    // 1. Convert <a href="...">Label</a> to [Label](<URL>)
+    // Regex matches href and content. 
+    // Use < > around the URL to ensure it doesn't break if the URL contains parenthesis.
+    let text = html.replace(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, label) => {
+        // Fix relative URLs
+        if (href.startsWith("/")) {
+            href = "https://tagging.wiki" + href;
+        }
+
+        // CONSTRAINT: If the link label includes a [] (e.g. [[recode] game]), return just the text, no link.
+        if (label.includes("[") || label.includes("]")) {
+            return label;
+        }
+
+        // Clean the label of any internal HTML tags (like <b> inside the link)
+        const cleanLabel = label.replace(/<[^>]*>?/gm, "");
+        
+        return `[${cleanLabel}](<${href}>)`; 
+    });
+
+    // 2. Replace common block elements with newlines before stripping to preserve spacing
+    text = text.replace(/<(p|div|br|li|tr)[^>]*>/gi, "\n");
+
+    // 3. Strip all remaining HTML tags
+    text = text.replace(/<[^>]*>?/gm, "");
+
+    // 4. Decode basic HTML entities
+    text = text
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ');
+
+    // 5. Clean up excessive newlines
+    return text.replace(/\n\s*\n/g, "\n\n").trim();
+}
+
 // -------------------- GEMINI --------------------
 function extractText(result) {
     try {
@@ -1180,14 +1233,13 @@ if (linkMatches.length) {
             if (sectionName) {
                 explicitTemplateContent = await getSectionContent(canonical, sectionName);
             } else {
-                // Replace getLeadSection() with a clean extract API call
-                const extractRes = await fetch(
-                    `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
-                );
+                // use getLeadSection because support link parsing via stripHtmlPreservingLinks
+                // prop=extracts strips links on the API side, so we can't use it if we want links.
+                explicitTemplateContent = await getLeadSection(canonical);
                 
-                const extractJson = await extractRes.json();
-                const pageObj = Object.values(extractJson.query.pages)[0];
-                explicitTemplateContent = pageObj.extract || "No content available.";
+                if (!explicitTemplateContent) {
+                    explicitTemplateContent = "No content available.";
+                }
             }
         
             explicitTemplateName = rawTemplate;
