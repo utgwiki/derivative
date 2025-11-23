@@ -4,43 +4,6 @@ const API = "https://tagging.wiki/w/api.php";
 let knownPages = [];
 let pageLookup = new Map();
 
-// --- HELPER ---
-function stripHtmlPreservingLinks(html) {
-    if (!html) return "";
-
-    // Remove style/script blocks completely (prevents CSS output)
-    html = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-    html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-
-    // Convert links
-    let text = html.replace(
-        /<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi,
-        (match, quote, href, label) => {
-            if (href.startsWith("/")) href = "https://tagging.wiki" + href;
-            if (label.includes("[") || label.includes("]")) return label;
-            const cleanLabel = label.replace(/<[^>]*>?/gm, "");
-            return `[${cleanLabel}](<${href}>)`;
-        }
-    );
-
-    // Only p and br → newline
-    text = text.replace(/<(p|br)[^>]*>/gi, "\n");
-
-    // Strip all other tags
-    text = text.replace(/<[^>]*>?/gm, "");
-
-    // Decode entities
-    text = text
-        .replace(/&quot;/g, '"')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&nbsp;/g, ' ');
-
-    // Collapse multiple blank lines
-    return text.replace(/\n\s*\n/g, "\n\n").trim();
-}
-
 // --- WIKI API FUNCTIONS ---
 async function getAllNamespaces() {
     try {
@@ -282,12 +245,9 @@ async function getSectionContent(pageTitle, sectionName) {
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
-        prop: "text", 
+        prop: "text",
         page: pageTitle,
-        section: sectionIndex,
-        disablelimitreport: "true",
-        disableeditsection: "true",
-        disabletoc: "true"
+        section: sectionIndex
     });
 
     try {
@@ -298,8 +258,7 @@ async function getSectionContent(pageTitle, sectionName) {
 
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-        
-        return stripHtmlPreservingLinks(html);
+        return html.replace(/<[^>]*>?/gm, ""); // strip HTML
     } catch (err) {
         console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
         return null;
@@ -310,12 +269,9 @@ async function getLeadSection(pageTitle) {
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
-        prop: "text", 
+        prop: "text",
         page: pageTitle,
-        section: "0", 
-        disablelimitreport: "true",
-        disableeditsection: "true",
-        disabletoc: "true"
+        section: "0"
     });
 
     try {
@@ -325,8 +281,7 @@ async function getLeadSection(pageTitle) {
         const json = await res.json();
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-
-        return stripHtmlPreservingLinks(html);
+        return html.replace(/<[^>]*>?/gm, ""); // Strip HTML
     } catch (err) {
         console.error(`Failed to fetch lead section for "${pageTitle}":`, err.message);
         return null;
