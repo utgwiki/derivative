@@ -12,7 +12,6 @@ function stripHtmlPreservingLinks(html) {
     // 1. Remove style, script, and comments
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-    text = text.replace(//g, "");
 
     // 2. Define the Link Regex separately to avoid syntax errors
     // Matches: <a ... href="..."> ... </a>
