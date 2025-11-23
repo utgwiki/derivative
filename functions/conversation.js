@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
-const { logMessage, memory: persistedMemory } = require("../memory.js"); 
+const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
 const { knownPages } = require("./parse_page.js"); // Need this for askGeminiForPages
 
 // node-fetch
