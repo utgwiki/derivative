@@ -9,7 +9,7 @@ function stripHtmlPreservingLinks(html) {
     if (!html) return "";
     let text = html;
 
-    // FORCE REMOVE CSS styles, JS scripts, and Comments entirely
+    // 1. 🔥 FORCE REMOVE CSS styles, JS scripts, and Comments entirely
     // [\s\S]*? ensures we match newlines inside the tags
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
@@ -24,6 +24,10 @@ function stripHtmlPreservingLinks(html) {
         
         // Clean inner tags from label (e.g. <b>Link</b>)
         const cleanLabel = label.replace(/<[^>]*>?/gm, "");
+        
+        // Handle empty labels
+        if (!cleanLabel.trim()) return "";
+        
         return `[${cleanLabel}](<${href}>)`; 
     });
 
@@ -38,13 +42,14 @@ function stripHtmlPreservingLinks(html) {
                .replace(/&amp;/g, '&')
                .replace(/&lt;/g, '<')
                .replace(/&gt;/g, '>')
-               .replace(/&nbsp;/g, ' ');
+               .replace(/&nbsp;/g, ' ')
+               .replace(/&#039;/g, "'");
 
     return text.replace(/\n\s*\n/g, "\n\n").trim();
 }
 
 // --- WIKI API FUNCTIONS ---
-// -------------------- NAMESPACES + ALL PAGES FETCH (exclude Talk & User namespaces) --------------------
+// -------------------- NAMESPACES + ALL PAGES FETCH --------------------
 async function getAllNamespaces() {
     try {
         const params = new URLSearchParams({
@@ -64,32 +69,24 @@ async function getAllNamespaces() {
         const includeNs = Object.entries(nsObj)
             .map(([k, v]) => {
                 const id = parseInt(k, 10);
-                // namespace name is usually in the "*" property; fallback to canonical if present
                 const name = (v && (v["*"] || v.canonical || "")).toString().trim();
                 return { id, name };
             })
             .filter(({ id, name }) => {
-                if (Number.isNaN(id) || id < 0) return false; // skip invalid / negative ids
+                if (Number.isNaN(id) || id < 0) return false; 
                 const lower = name.toLowerCase();
-                // Exclude any namespace whose name contains "talk"
                 if (lower.includes("talk")) return false;
-                // Exclude "User" namespaces (matches "user", "user talk", or localized equivalents starting with "user")
-                // We check for the word 'user' (start or whole) to avoid false positives like "superuser" intentionally
-                // but if your wiki has different namespace names adjust this test accordingly.
                 if (/^user\b/i.test(name) || /\buser\b/i.test(name)) return false;
-                if (/^file\b/i.test(name) || /\bfile\b/i.test(name)) return false; // exclude file namespace
-                // Allow main namespace (name === "" usually) and all others that passed the filters
+                if (/^file\b/i.test(name) || /\bfile\b/i.test(name)) return false;
                 return true;
             })
             .map(o => o.id);
 
-        // If nothing found (very unlikely), fallback to sensible default namespaces (main + 4)
         if (!includeNs.length) return [0, 4];
 
         return includeNs;
     } catch (err) {
         console.error("Failed to fetch namespaces:", err.message || err);
-        // Fallback to main + content namespace if API fails
         return [0, 4];
     }
 }
@@ -99,7 +96,6 @@ async function getAllPages() {
     try {
         const namespaces = await getAllNamespaces();
 
-        // iterate every allowed namespace (excluding talk & user)
         for (const ns of namespaces) {
             let apcontinue = null;
             do {
@@ -128,11 +124,10 @@ async function getAllPages() {
             } while (apcontinue);
         }
 
-        // Deduplicate and return
         return [...new Set(pages)];
     } catch (err) {
         console.error("getAllPages error:", err.message || err);
-        return [...new Set(pages)]; // return what we could gather
+        return [...new Set(pages)]; 
     }
 }
 
@@ -141,6 +136,7 @@ async function loadPages() {
         console.log("Loading all wiki pages...");
 
         const newPages = await getAllPages();
+        // ✅ Fix: modify array in-place so conversation.js sees the updates
         knownPages.length = 0; 
         knownPages.push(...newPages);
         
@@ -176,11 +172,11 @@ async function findCanonicalTitle(input) {
                 ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()
                 : seg.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("_")
         );
-        const alt = parts.join(":"); // e.g. "Dev:Outfit_Helper"
+        const alt = parts.join(":"); 
         if (pageLookup.has(alt.toLowerCase())) return pageLookup.get(alt.toLowerCase());
     }
 
-    // LAST RESORT: query the MediaWiki API directly (handles non-main namespaces, redirects, and exact matches)
+    // LAST RESORT: query the MediaWiki API directly
     try {
         const titleTryVariants = [
             raw,
@@ -206,24 +202,18 @@ async function findCanonicalTitle(input) {
             if (!page) continue;
             if (page.missing !== undefined) continue;
 
-            // Determine if API returned a redirect fragment (tofragment) for this lookup
-            let canonicalTitle = page.title; // e.g. "Tagging"
-            // json.query.redirects (if present) may contain a tofragment property
+            let canonicalTitle = page.title; 
             const redirects = json.query?.redirects || [];
             let fragment = null;
             if (redirects.length) {
-                // Prefer any redirect that has a tofragment; otherwise none
                 const rd = redirects.find(r => r.tofragment) || redirects[0];
                 if (rd?.tofragment) fragment = rd.tofragment;
             }
 
-            // If there is a fragment, include it in the canonical like "Tagging#No Tag Back"
             if (fragment) canonicalTitle = `${canonicalTitle}#${fragment}`;
 
-            // update lookup for future fast resolution (store both plain and fragment forms where appropriate)
             pageLookup.set(page.title.toLowerCase(), page.title);
             pageLookup.set(page.title.replace(/_/g, " ").toLowerCase(), page.title);
-            // also store canonical with fragment (for quick future matches using the original input)
             pageLookup.set((canonicalTitle).toLowerCase(), canonicalTitle);
 
             return canonicalTitle;
@@ -257,9 +247,8 @@ async function getWikiContent(pageTitle) {
         const html = json.parse?.text?.["*"];
         if (!html) return null;
 
-        // Use the helper instead of simple regex
+        // ✅ Updated to use the helper that removes CSS/Style tags
         return stripHtmlPreservingLinks(html);
-        
     } catch (err) {
         console.error(`Failed to fetch content for "${pageTitle}":`, err.message);
         return null;
@@ -285,7 +274,6 @@ async function getSectionIndex(pageTitle, sectionName) {
         const sections = json.parse?.sections || [];
         if (!sections.length) return null;
 
-        // Try to find the section index case-insensitively
         const match = sections.find(
             s => s.line.toLowerCase() === sectionName.toLowerCase()
         );
@@ -307,7 +295,7 @@ async function getSectionContent(pageTitle, sectionName) {
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
-        prop: "text", // fetch text (HTML) to get the links
+        prop: "text", 
         page: pageTitle,
         section: sectionIndex,
         disablelimitreport: "true",
@@ -324,7 +312,6 @@ async function getSectionContent(pageTitle, sectionName) {
         const html = json.parse?.text?.["*"];
         if (!html) return null;
         
-        // Use the new helper
         return stripHtmlPreservingLinks(html);
     } catch (err) {
         console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
@@ -336,9 +323,9 @@ async function getLeadSection(pageTitle) {
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
-        prop: "text", // Fetch HTML
+        prop: "text", 
         page: pageTitle,
-        section: "0", // Lead section
+        section: "0", 
         disablelimitreport: "true",
         disableeditsection: "true",
         disabletoc: "true"
@@ -352,7 +339,6 @@ async function getLeadSection(pageTitle) {
         const html = json.parse?.text?.["*"];
         if (!html) return null;
 
-        // Use the new helper
         return stripHtmlPreservingLinks(html);
     } catch (err) {
         console.error(`Failed to fetch lead section for "${pageTitle}":`, err.message);
@@ -361,7 +347,6 @@ async function getLeadSection(pageTitle) {
 }
 
 async function parseWikiLinks(text) {
-    // Match [[Page]] or [[Page|Label]]
     const regex = /\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]/g;
     const matches = [];
     let match;
@@ -375,7 +360,6 @@ async function parseWikiLinks(text) {
         });
     }
 
-    // Resolve each match in parallel
     const processed = await Promise.all(matches.map(async m => {
         const display = m.label || m.page;
         const canonical = await findCanonicalTitle(m.page) || m.page;
@@ -394,7 +378,6 @@ async function parseWikiLinks(text) {
         return { index: m.index, length: m.length, replacement: `[**${display}**](${url})` };
     }));
 
-    // Reconstruct (descending index)
     let res = text;
     processed.sort((a,b)=> b.index - a.index);
     for (const { index, length, replacement } of processed) {
@@ -403,7 +386,6 @@ async function parseWikiLinks(text) {
     return res;
 }
 
-// resolve canonical title first and fetch section when fragment present
 async function parseTemplates(text) {
     const regex = /\{\{([^{}|]+)(?:\|([^{}]*))?\}\}/g;
     const matches = [];
@@ -421,15 +403,13 @@ async function parseTemplates(text) {
 
     const processedMatches = await Promise.all(matches.map(async (m) => {
         const { fullMatch, templateName, param, index, length } = m;
-        let replacement = fullMatch; // default
+        let replacement = fullMatch; 
 
-        // Resolve canonical first (may include "#Section" fragment)
         const canonical = await findCanonicalTitle(templateName);
         if (!canonical) {
             return { index, length, replacement: "I don't know." };
         }
 
-        // If canonical includes a fragment, split it
         let pageOnly = canonical;
         let fragment = null;
         if (canonical.includes("#")) {
@@ -437,7 +417,6 @@ async function parseTemplates(text) {
             fragment = fragment.trim();
         }
 
-        // Fetch section content if fragment exists, otherwise lead section
         let wikiText = null;
         try {
             if (fragment) {
@@ -450,12 +429,10 @@ async function parseTemplates(text) {
         }
 
         if (wikiText) {
-            // Build URL: encode page path properly, append encoded fragment as anchor
             const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
             const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
             const link = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
 
-            // Use the original templateName as label but show canonical context
             replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
         } else {
             replacement = "I don't know.";
@@ -464,7 +441,6 @@ async function parseTemplates(text) {
         return { index, length, replacement };
     }));
 
-    // Reconstruct string safely (descending indices)
     let result = text;
     processedMatches.sort((a, b) => b.index - a.index);
     for (const { index, length, replacement } of processedMatches) {
@@ -476,7 +452,7 @@ async function parseTemplates(text) {
 
 module.exports = { 
     API, 
-    knownPages, // Exporting this so conversation.js can see it if needed
+    knownPages, 
     loadPages, 
     findCanonicalTitle, 
     getWikiContent, 
