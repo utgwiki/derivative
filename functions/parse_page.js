@@ -7,15 +7,37 @@ let pageLookup = new Map();
 // --- HELPER ---
 function stripHtmlPreservingLinks(html) {
     if (!html) return "";
-    let text = html.replace(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, label) => {
-        if (href.startsWith("/")) href = "https://tagging.wiki" + href;
-        if (label.includes("[") || label.includes("]")) return label;
-        const cleanLabel = label.replace(/<[^>]*>?/gm, "");
-        return `[${cleanLabel}](<${href}>)`; 
-    });
-    text = text.replace(/<(p|div|br|li|tr)[^>]*>/gi, "\n");
+
+    // Remove style/script blocks completely (prevents CSS output)
+    html = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+    html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+
+    // Convert links
+    let text = html.replace(
+        /<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi,
+        (match, quote, href, label) => {
+            if (href.startsWith("/")) href = "https://tagging.wiki" + href;
+            if (label.includes("[") || label.includes("]")) return label;
+            const cleanLabel = label.replace(/<[^>]*>?/gm, "");
+            return `[${cleanLabel}](<${href}>)`;
+        }
+    );
+
+    // Only p and br → newline
+    text = text.replace(/<(p|br)[^>]*>/gi, "\n");
+
+    // Strip all other tags
     text = text.replace(/<[^>]*>?/gm, "");
-    text = text.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+
+    // Decode entities
+    text = text
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ');
+
+    // Collapse multiple blank lines
     return text.replace(/\n\s*\n/g, "\n\n").trim();
 }
 
