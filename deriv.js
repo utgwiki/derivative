@@ -408,11 +408,9 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
             const canonical = await findCanonicalTitle(rawTemplate);
             
             if (!canonical) {
-                // FIX #2: If page not found, disable Components V2 so it falls back to plain text "I don't know."
                 shouldUseComponentsV2 = false;
                 explicitTemplateContent = "I don't know.";
             } else {
-                // FIX #1: Assign the found title explicitly so the button works later
                 explicitTemplateFoundTitle = canonical;
 
                 if (sectionName) {
@@ -436,10 +434,16 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         let pageTitles = [];
         let wikiContent = "";
         
-        if (explicitTemplateFoundTitle && explicitTemplateContent) {
-            pageTitles = [explicitTemplateFoundTitle];
-            wikiContent = `\n\n--- Page: ${explicitTemplateFoundTitle} ---\n${explicitTemplateContent}`;
+        // 💡 UPDATED LOGIC: Checking skipGemini to prevent unnecessary calls
+        if (skipGemini) {
+            // We are in template mode. 
+            // If we found a title, assign it to pageTitles so image fetching works later.
+            if (explicitTemplateFoundTitle) {
+                pageTitles = [explicitTemplateFoundTitle];
+            }
+            // We intentionally do NOT call askGeminiForPages here.
         } else {
+            // Normal operation (non-template mode)
             pageTitles = await askGeminiForPages(userMsg);
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
