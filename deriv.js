@@ -285,7 +285,7 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.targetMessage;
     } else if (messageOrInteraction.client._selectedMessage) {
-        // This is the message passed from the Modal Submit interaction
+        // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.client._selectedMessage;
     }
     // If 'message' is null here, it means no message object is available for attachment checks.
@@ -407,17 +407,26 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         
             const canonical = await findCanonicalTitle(rawTemplate);
             
-            if (sectionName) {
-                explicitTemplateContent = await getSectionContent(canonical, sectionName);
+            if (!canonical) {
+                // FIX #2: If page not found, disable Components V2 so it falls back to plain text "I don't know."
+                shouldUseComponentsV2 = false;
+                explicitTemplateContent = "I don't know.";
             } else {
-                // Replace getLeadSection() with a clean extract API call
-                const extractRes = await fetch(
-                    `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
-                );
-                
-                const extractJson = await extractRes.json();
-                const pageObj = Object.values(extractJson.query.pages)[0];
-                explicitTemplateContent = pageObj.extract || "No content available.";
+                // FIX #1: Assign the found title explicitly so the button works later
+                explicitTemplateFoundTitle = canonical;
+
+                if (sectionName) {
+                    explicitTemplateContent = await getSectionContent(canonical, sectionName);
+                } else {
+                    // Replace getLeadSection() with a clean extract API call
+                    const extractRes = await fetch(
+                        `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
+                    );
+                    
+                    const extractJson = await extractRes.json();
+                    const pageObj = Object.values(extractJson.query.pages)[0];
+                    explicitTemplateContent = pageObj.extract || "No content available.";
+                }
             }
         
             explicitTemplateName = rawTemplate;
