@@ -469,6 +469,21 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
             reply = explicitTemplateContent || "I don't know.";
         }
 
+        // If Gemini outputs [TERMINATE_MESSAGE],
+        // we silently drop it.
+        if (reply.trim() === "[TERMINATE_MESSAGE]") {
+            // Check if it's an interaction (has editReply). If so, we MUST reply to close the interaction.
+            if (isInteraction(messageOrInteraction)) {
+                // For interactions, we can't just be silent, or the command says "Application did not respond".
+                // We'll just send a generic refusal or modify the output slightly.
+                reply = "I cannot reply to that."; 
+            } else {
+                // For normal chat, we just stop entirely.
+                if (typingInterval) clearInterval(typingInterval);
+                return; 
+            }
+        }
+
         let parsedReply = await parseTemplates(reply);  
         parsedReply = await parseWikiLinks(parsedReply);
 
@@ -705,7 +720,7 @@ client.on("messageCreate", async (message) => {
         message.content
     );
 
-    const userMsg = message.content.trim();
+    let userMsg = message.content.trim(); 
     if (!userMsg) return;
 
     const isDM = !message.guild;
@@ -721,12 +736,31 @@ client.on("messageCreate", async (message) => {
 
     const hasWikiSyntax = /\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content);
 
-    // Fire only if:
-    // - DM
-    // - Mention
-    // - Reply to bot
-    // - OR message contains {{ }} or [[ ]]
+    // Fire only if: DM, Mention, Reply to bot, OR message contains {{ }} or [[ ]]
     if (!(isDM || mentioned || isReply || hasWikiSyntax)) return;
+
+    // If the user mentions the bot but writes very little (e.g. "@Derivative"), 
+    // they probably want us to read the message strictly before it.
+    const cleanContent = userMsg.replace(/<@!?\d+>/g, "").trim();
+    
+    // If content is empty/short AND it's not a direct reply to a specific message
+    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM) {
+        try {
+            // Fetch last 2 messages (Current + Previous)
+            const messages = await message.channel.messages.fetch({ limit: 2 });
+            if (messages.size === 2) {
+                const previousMessage = messages.last(); // .last() is the older one
+                
+                // Ensure previous message isn't a bot and has text
+                if (previousMessage && !previousMessage.author.bot && previousMessage.content) {
+                    // Prepend the context so Gemini sees: "Previous text... [User Ping]"
+                    userMsg = `${previousMessage.content}\n\n[System Note: User pinged you regarding the text above]`;
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch previous context:", err);
+        }
+    }
 
     await handleUserRequest(userMsg, message);
 });
