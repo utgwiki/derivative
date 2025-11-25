@@ -255,8 +255,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
     }
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
-    // add user input with Discord username
-    // addToHistory(channelId, "user", userInput, message?.author?.username);
+
+    const username = message?.author?.username || "User";
+    const taggedInput = `[user: ${username}] ${userInput}`;
 
     try {
         return await runWithMainKeys(async (gemini) => {
@@ -273,7 +274,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             });
 
             const userContent = [...imageParts, {
-                text: userInput
+                text: taggedInput 
             }];
 
             const response = await chat.sendMessage({
