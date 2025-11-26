@@ -1,4 +1,3 @@
-// deriv.js
 require("dotenv").config();
 
 // --- IMPORTS ---
