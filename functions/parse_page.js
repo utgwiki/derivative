@@ -1,6 +1,6 @@
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-const API = "https://tagging.wiki/w/api.php";
+const API = "https://sewh.miraheze.org/w/api.php";
 let knownPages = [];
 let pageLookup = new Map();
 
@@ -14,7 +14,7 @@ async function getAllNamespaces() {
             format: "json"
         });
         const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         if (!res.ok) throw new Error(`Namespaces fetch failed: ${res.status}`);
         const json = await res.json();
@@ -65,7 +65,7 @@ async function getAllPages() {
 
                 const url = `${API}?${params.toString()}`;
                 const res = await fetch(url, {
-                    headers: { "User-Agent": "DiscordBot/Deriv" }
+                    headers: { "User-Agent": "DiscordBot/H3LP3R" }
                 });
                 if (!res.ok) throw new Error(`Failed: ${res.status} ${res.statusText}`);
                 const json = await res.json();
@@ -143,7 +143,7 @@ async function findCanonicalTitle(input) {
                 redirects: "1",
                 indexpageids: "1"
             });
-            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/H3LP3R" } });
             if (!res.ok) continue;
             const json = await res.json();
 
@@ -187,8 +187,8 @@ async function getWikiContent(pageTitle) {
     try {
         const res = await fetch(`${API}?${params.toString()}`, {
             headers: {
-                "User-Agent": "DiscordBot/Deriv",
-                "Origin": "https://tagging.wiki",
+                "User-Agent": "DiscordBot/H3LP3R",
+                "Origin": "https://sewh.miraheze.org",
             },
         });
 
@@ -217,7 +217,7 @@ async function getSectionIndex(pageTitle, sectionName) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const json = await res.json();
@@ -253,7 +253,7 @@ async function getSectionContent(pageTitle, sectionName) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         const json = await res.json();
 
@@ -277,7 +277,7 @@ async function getLeadSection(pageTitle) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         const json = await res.json();
         const html = json.parse?.text?.["*"];
@@ -316,7 +316,7 @@ async function parseWikiLinks(text) {
 
         const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
         const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
-        const url = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
+        const url = `<https://sewh.miraheze.org/wiki/${parts.join(':')}${anchor}>`;
 
         return { index: m.index, length: m.length, replacement: `[**${display}**](${url})` };
     }));
@@ -374,7 +374,7 @@ async function parseTemplates(text) {
         if (wikiText) {
             const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
             const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
-            const link = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
+            const link = `<https://sewh.miraheze.org/wiki/${parts.join(':')}${anchor}>`;
 
             replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
         } else {
