@@ -742,8 +742,52 @@ client.on("messageCreate", async (message) => {
     // they probably want us to read the message strictly before it.
     const cleanContent = userMsg.replace(/<@!?\d+>/g, "").trim();
     
+    // Case 1: User is Replying to a specific message using Discord Reply
+    if (message.reference) {
+        try {
+            const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
+            
+            // Make sure the referenced message has text content
+            if (referencedMessage.content) {
+                const contextHeader = `[SYSTEM: I am replying to ${referencedMessage.author.username}'s message: "${referencedMessage.content}"]`;
+                userMsg = `${contextHeader}\n\n${userMsg}`;
+            }
+        } catch (err) {
+            console.error("Failed to fetch reply context:", err);
+        }
+    } 
+    // Case 2: General question (No Reply, No Image) - "Is this true?", "Explain", etc.
+    // We fetch the last 5 human messages to give the bot context of the conversation.
+    else if (message.attachments.size === 0 && !userMsg.match(/(https?:\/\/[^\s]+)/g)) {
+        try {
+            // 1. Fetch last 15 messages (to ensure we get 5 humans after filtering bots)
+            // 'before: message.id' ensures we don't fetch the current command itself
+            const pastMessages = await message.channel.messages.fetch({ limit: 15, before: message.id });
+
+            // 2. Filter: No bots, must have text content
+            const lastHumanMessages = pastMessages
+                .filter(m => !m.author.bot && m.content.trim().length > 0)
+                .first(5) // Get the 5 most recent matching messages
+                .reverse(); // Reverse them so they are in chronological order (Oldest -> Newest)
+
+            // 3. Construct the context block
+            if (lastHumanMessages.length > 0) {
+                const contextLog = lastHumanMessages
+                    .map(m => `[User: ${m.author.username}]: ${m.content}`)
+                    .join("\n");
+
+                const contextBlock = `[SYSTEM: Here is the recent conversation context in this channel. Use this if my request is vague like "is this true?" or "explain":\n${contextLog}\n]`;
+
+                // 4. Prepend to the actual user message
+                userMsg = `${contextBlock}\n\n${userMsg}`;
+            }
+        } catch (err) {
+            console.error("Failed to fetch channel context:", err);
+        }
+    }
+    
     // If content is empty/short AND it's not a direct reply to a specific message
-    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM) {
+    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM && !userMsg.includes("[SYSTEM:")) {
         try {
             // Fetch last 2 messages (Current + Previous)
             const messages = await message.channel.messages.fetch({ limit: 2 });
