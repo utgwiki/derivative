@@ -1,3 +1,3 @@
 require('dotenv').config();
-require("./deriv")
+require("./initialise")
 require("./server")
