@@ -315,4 +315,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
     }
 }
 
-module.exports = { askGemini, askGeminiForPages, MESSAGES };
+// to check if history exists for a channel/user
+function getHistory(channelId) {
+    return chatHistories.get(channelId) || [];
+}
+
+module.exports = { askGemini, askGeminiForPages, MESSAGES, getHistory };
