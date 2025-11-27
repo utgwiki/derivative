@@ -45,6 +45,19 @@ const {
     ApplicationCommandType
 } = require("discord.js");
 
+// --- FREE WILL CONFIGURATION ---
+const IGNORED_CHANNELS = ["bulletin", "announcements", "rules", "updates", "logs"];
+const TRIGGER_KEYWORDS = ["derivative", "deriv"];
+const RESPONSE_CHANCE = 0.4; // 40% chance to respond to keywords if not pinged directly
+
+// --- FOLLOW-UP STATE MANAGER ---
+// Stores: { channelId: { timer: Timeout, lastInteraction: Date } }
+const activeConversations = new Map(); 
+
+// 5 minutes to 3 hours (in milliseconds)
+const MIN_FOLLOWUP_DELAY = 5 * 60 * 1000; 
+const MAX_FOLLOWUP_DELAY = 3 * 60 * 60 * 1000;
+
 // node-fetch wrapper 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
@@ -152,6 +165,61 @@ function safeSend(ctx, payload) {
     } catch (err) {
         console.error("safeSend error:", err);
     }
+}
+
+// FOLLOW UP MESSAGES
+const { getHistory } = require("./functions/conversation.js"); 
+
+async function scheduleFollowUp(message) {
+    const channelId = message.channel.id;
+
+    // Clear existing timer if talking (reset the clock)
+    if (activeConversations.has(channelId)) {
+        clearTimeout(activeConversations.get(channelId).timer);
+    }
+
+    // Decide if we want to follow up (Random chance: 50%)
+    // Only follow up in DMs or if the user specifically engaged recently
+    if (Math.random() < 0.5) return; 
+
+    // Calculate random delay
+    const delay = Math.floor(Math.random() * (MAX_FOLLOWUP_DELAY - MIN_FOLLOWUP_DELAY + 1)) + MIN_FOLLOWUP_DELAY;
+    
+    // console.log(`Scheduling follow-up for ${channelId} in ${(delay/60000).toFixed(2)} minutes.`);
+
+    const timer = setTimeout(async () => {
+        try {
+            // Check if the channel still exists
+            const channel = await client.channels.fetch(channelId).catch(() => null);
+            if (!channel) return;
+
+            // Get history to ensure we have context
+            const history = getHistory(channelId);
+            if (!history || history.length < 2) return; // Don't follow up on empty interactions
+
+            // Construct the "Proactive" prompt
+            const systemNote = `[SYSTEM: It has been ${(delay/60000).toFixed(0)} minutes since you last spoke. 
+            The user hasn't replied. 
+            Construct a short, casual follow-up message based on the previous conversation context above. 
+            Ask how they are, or bring up a related topic from the history. 
+            Do NOT greet them like it's the first time. 
+            If the last conversation ended naturally (like "bye"), do not send anything and output [TERMINATE_MESSAGE].]`;
+
+            // Call handleUserRequest but pretend it's a system prompt
+            // We pass a flag to indicate this is a self-prompt
+            await handleUserRequest(systemNote, { channel: channel, author: client.user }, false, true);
+
+        } catch (err) {
+            console.error("Follow-up execution failed:", err);
+        } finally {
+            activeConversations.delete(channelId);
+        }
+    }, delay);
+
+    activeConversations.set(channelId, {
+        timer: timer,
+        lastInteraction: Date.now()
+    });
 }
 
 // -------------------- STATUS --------------------
@@ -267,7 +335,7 @@ client.once("ready", async () => {
 });
 
 // -------------------- HANDLER --------------------
-async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = false) {
+async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = false, isProactive = false) {
     // 1. Initial validation
     if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
 
@@ -713,6 +781,12 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
+    // If the channel name contains blocked words, ignore completely
+    if (message.channel.name) {
+        const lowerName = message.channel.name.toLowerCase();
+        if (IGNORED_CHANNELS.some(blocked => lowerName.includes(blocked))) return;
+    }
+    
     logMessage(
         message.channel.id,
         message.author.username,
@@ -725,6 +799,20 @@ client.on("messageCreate", async (message) => {
     const isDM = !message.guild;
     const mentioned = message.mentions.has(client.user);
 
+    // FREE WILL Keyword Detection 
+    let keywordTriggered = false;
+    if (!mentioned && !isDM) {
+        const lowerContent = userMsg.toLowerCase();
+        const hasKeyword = TRIGGER_KEYWORDS.some(kw => lowerContent.includes(kw));
+        
+        // If keyword found, roll the dice
+        if (hasKeyword) {
+            if (Math.random() < RESPONSE_CHANCE) {
+                keywordTriggered = true;
+            }
+        }
+    }
+    
     let isReply = false;
     if (message.reference) {
         try {
@@ -735,8 +823,8 @@ client.on("messageCreate", async (message) => {
 
     const hasWikiSyntax = /\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content);
 
-    // Fire only if: DM, Mention, Reply to bot, OR message contains {{ }} or [[ ]]
-    if (!(isDM || mentioned || isReply || hasWikiSyntax)) return;
+    // Respond if: DM OR Mentioned OR Reply OR WikiSyntax OR (Keyword AND Won the lottery)
+    if (!(isDM || mentioned || isReply || hasWikiSyntax || keywordTriggered)) return;
 
     // If the user mentions the bot but writes very little (e.g. "@Derivative"), 
     // they probably want us to read the message strictly before it.
@@ -806,6 +894,11 @@ client.on("messageCreate", async (message) => {
     }
 
     await handleUserRequest(userMsg, message);
+
+    // Only schedule if it's a DM or the user explicitly pinged/replied (showing interest)
+    if (isDM || mentioned || isReply) {
+        scheduleFollowUp(message);
+    }
 });
 
 client.on("interactionCreate", async (interaction) => {
