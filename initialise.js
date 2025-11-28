@@ -390,7 +390,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
 
         // 2. Check for image links in the message content (which uses userMsg)
         const urlRegex = /(https?:\/\/[^\s]+?\.(jpe?g|png|gif|webp))/gi;
-        const matches = [...userMsg.matchAll(urlRegex)];
+        const matches = [...rawUserMsg.matchAll(urlRegex)];
         matches.forEach(match => imageURLs.push(match[0]));
 
         const uniqueImageURLs = [...new Set(imageURLs)].slice(0, 5); // Max 5 images
@@ -807,7 +807,7 @@ client.on("messageCreate", async (message) => {
     // FREE WILL Keyword Detection 
     let keywordTriggered = false;
     if (!mentioned && !isDM) {
-        const lowerContent = userMsg.toLowerCase();
+        const lowerContent = rawUserMsg.toLowerCase();
         const hasKeyword = TRIGGER_KEYWORDS.some(kw => lowerContent.includes(kw));
         
         // If keyword found, roll the dice
@@ -878,7 +878,7 @@ client.on("messageCreate", async (message) => {
     }
     
     // If content is empty/short AND it's not a direct reply to a specific message
-    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM && !userMsg.includes("[SYSTEM:")) {
+    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM && !rawUserMsg.includes("[SYSTEM:")) {
         try {
             // Fetch last 2 messages (Current + Previous)
             const messages = await message.channel.messages.fetch({ limit: 2 });
