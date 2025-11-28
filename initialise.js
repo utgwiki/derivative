@@ -205,9 +205,18 @@ async function scheduleFollowUp(message) {
             Do NOT greet them like it's the first time. 
             If the last conversation ended naturally (like "bye"), do not send anything and output [TERMINATE_MESSAGE].]`;
 
+            const mockMessage = {
+                channel: channel,
+                author: client.user,
+                client: client,        // Added: Needed for handleUserRequest checks
+                attachments: { size: 0 }, // Added: Pass attachment check safely
+                content: systemNote,
+                guild: channel.guild
+            };
+            
             // Call handleUserRequest but pretend it's a system prompt
-            // We pass a flag to indicate this is a self-prompt
-            await handleUserRequest(systemNote, { channel: channel, author: client.user }, false, true);
+            // pass a flag to indicate this is a self-prompt
+            await handleUserRequest(systemNote, mockMessage, false, true);
 
         } catch (err) {
             console.error("Follow-up execution failed:", err);
