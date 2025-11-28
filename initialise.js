@@ -833,7 +833,7 @@ client.on("messageCreate", async (message) => {
 
     // If the user mentions the bot but writes very little (e.g. "@Derivative"), 
     // they probably want us to read the message strictly before it.
-    const cleanContent = userMsg.replace(/<@!?\d+>/g, "").trim();
+    const cleanContent = rawUserMsg.replace(/<@!?\d+>/g, "").trim();
     
     // Case 1: User is Replying to a specific message using Discord Reply
     if (message.reference) {
@@ -851,7 +851,7 @@ client.on("messageCreate", async (message) => {
     } 
     // Case 2: General question (No Reply, No Image) - "Is this true?", "Explain", etc.
     // We fetch the last 5 human messages to give the bot context of the conversation.
-    else if (message.attachments.size === 0 && !userMsg.match(/(https?:\/\/[^\s]+)/g)) {
+    else if (message.attachments.size === 0 && !rawUserMsg.match(/(https?:\/\/[^\s]+)/g)) {
         try {
             // 1. Fetch last 15 messages (to ensure we get 5 humans after filtering bots)
             // 'before: message.id' ensures we don't fetch the current command itself
