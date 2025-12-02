@@ -309,7 +309,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     message: currentMessageParts
                 });
                 
-                let text = response.response.text().trim();
+                let text = response.text.trim();
                 
                 // 2. Check for [MW_SEARCH: ...]
                 const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
@@ -339,7 +339,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const content = await getWikiContent(canonical);
                     
                     const resultText = content 
-                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 4000)}` // Limit length to avoid token overflow
+                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 1500)}` // Limit length to avoid token overflow
                         : `[SYSTEM] Page "${requestedTitle}" not found or empty. Try a different search.`;
 
                     // Feed content back to Gemini
