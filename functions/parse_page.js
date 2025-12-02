@@ -1,6 +1,6 @@
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-const API = "https://tagging.wiki/w/api.php";
+const API = "https://sewh.miraheze.org/w/api.php";
 let knownPages = [];
 let pageLookup = new Map();
 
@@ -188,7 +188,7 @@ async function getWikiContent(pageTitle) {
         const res = await fetch(`${API}?${params.toString()}`, {
             headers: {
                 "User-Agent": "DiscordBot/Deriv",
-                "Origin": "https://tagging.wiki",
+                "Origin": "https://sewh.miraheze.org",
             },
         });
 
@@ -316,7 +316,7 @@ async function parseWikiLinks(text) {
 
         const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
         const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
-        const url = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
+        const url = `<https://sewh.miraheze.org/wiki/${parts.join(':')}${anchor}>`;
 
         return { index: m.index, length: m.length, replacement: `[**${display}**](${url})` };
     }));
@@ -374,7 +374,7 @@ async function parseTemplates(text) {
         if (wikiText) {
             const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
             const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
-            const link = `<https://tagging.wiki/wiki/${parts.join(':')}${anchor}>`;
+            const link = `<https://sewh.miraheze.org/wiki/${parts.join(':')}${anchor}>`;
 
             replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
         } else {
