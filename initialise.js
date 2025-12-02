@@ -685,11 +685,15 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     const firstChunk = botTaggedChunks.shift();
                     if (firstChunk) {
                         if (isInteraction(messageOrInteraction)) {
-                            await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
-                        } else {
-                            // Message-based reply
-                            await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
-                        }
+                                await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
+                            } else {
+                                // Message-based reply (Safe Check)
+                                if (typeof messageOrInteraction.reply === 'function') {
+                                    await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
+                                } else {
+                                    await messageOrInteraction.channel.send({ ...replyOptions, content: firstChunk });
+                                }
+                            }
                     }
         
                     // 2. Send the rest as follow-ups/channel sends with a delay
@@ -724,7 +728,12 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     if (isInteraction(messageOrInteraction)) {
                         await messageOrInteraction.editReply(fallbackOptions);
                     } else {
-                        await messageOrInteraction.reply(fallbackOptions);
+                        // Safe fallback for mock messages
+                        if (typeof messageOrInteraction.reply === 'function') {
+                            await messageOrInteraction.reply(fallbackOptions);
+                        } else {
+                            await messageOrInteraction.channel.send(fallbackOptions);
+                        }
                     }
                 } else {
                     // For subsequent messages, we use a plain channel/interaction follow-up
