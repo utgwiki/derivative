@@ -54,9 +54,14 @@ const RESPONSE_CHANCE = 0.4; // 40% chance to respond to keywords if not pinged 
 // Stores: { channelId: { timer: Timeout, lastInteraction: Date } }
 const activeConversations = new Map(); 
 
+// 10 seconds to 20 seconds (in milliseconds)
+const MIN_FOLLOWUP_DELAY = 10 * 1000; // 10 seconds
+const MAX_FOLLOWUP_DELAY = 20 * 1000; // 20 seconds
+
+// TESTING RN
 // 5 minutes to 3 hours (in milliseconds)
-const MIN_FOLLOWUP_DELAY = 5 * 60 * 1000; 
-const MAX_FOLLOWUP_DELAY = 3 * 60 * 60 * 1000;
+// const MIN_FOLLOWUP_DELAY = 5 * 60 * 1000; 
+// const MAX_FOLLOWUP_DELAY = 3 * 60 * 60 * 1000;
 
 // node-fetch wrapper 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
