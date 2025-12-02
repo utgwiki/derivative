@@ -406,7 +406,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         // C. Update userMsg if images are present (as discussed in the previous answer)
         if (imageParts.length > 0) {
             if (!promptMsg.trim()) {
-                promptMsg = "What is in this image, and how does it relate to the wiki on https://tagging.wiki?";
+                promptMsg = "What is in this image, and how does it relate to the wiki on https://sewh.miraheze.org?";
             } else {
                 promptMsg = `Analyze the attached image(s) in the context of the following request: ${promptMsg}`;
             }
