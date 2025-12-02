@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
-const { knownPages } = require("./parse_page.js"); // Need this for askGeminiForPages
+const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
 
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -109,6 +109,23 @@ You are meant to engage in conversations about the game and anything, not someon
 IMPORTANT: If you detect that the user is constantly repeating the same thing and spamming nonsensical text, repeating words excessively to overload you, or being explicitly malicious to break you, output exactly: [TERMINATE_MESSAGE]
 If asked on why you decided "not to respond" to them, aka why you chose to terminate, say that you were not comfortable replying to their messages.
 Do not output anything else if you choose to terminate.
+
+### TOOL USE PROTOCOL
+    You have access to the wiki database. You are NOT limited to your training data.
+    1. If you need to find a page but don't know the exact title, generate exactly: [MW_SEARCH: your search query]
+    2. Stop immediately after generating that tag.
+    3. I will reply with a list of page titles.
+    4. Once you have a specific title, generate exactly: [MW_CONTENT: Page Title]
+    5. I will reply with the page content.
+    6. Once you have the information, answer the user's question naturally as Derivative.
+
+    Example Flow:
+    User: "How tall is the tower map?"
+    You: [MW_SEARCH: tower map]
+    System: Search Results: Tower of Hell, High Tower, Tower Map
+    You: [MW_CONTENT: Tower Map]
+    System: Content: The Tower Map is 500 studs high...
+    You: The Tower map is 500 studs high!
 
 For the latest updates, see the update page:
 - Current month: Update:${currentMonth}_${currentYear} (https://tagging.wiki/Update:${currentMonth}_${currentYear})
@@ -251,22 +268,23 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
     const channelId = message?.channel?.id || "global";
-
+    
+    // 1. Build Initial System Prompt
     let sysInstr = getSystemInstruction();
+    
+    // (Legacy support: if we pre-fetched pages in the old way, include them)
     if (wikiContent && pageTitle) {
-        sysInstr += `\n\nRelevant wiki page(s): "${pageTitle}"\nContent:\n${wikiContent}`;
+        sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
     }
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
-    // add user input with Discord username
-    // addToHistory(channelId, "user", userInput, message?.author?.username);
 
     try {
         return await runWithMainKeys(async (gemini) => {
             const chat = gemini.chats.create({
-                model: "gemini-2.5-flash",
+                model: "gemini-2.5-flash", 
                 maxOutputTokens: 2500,
-                config: {
+                config: { 
                     systemInstruction: sysInstr,
                     tools: [{
                         googleSearch: {}
@@ -275,42 +293,77 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 history: chatHistories.get(channelId),
             });
 
-            const userContent = [...imageParts, {
-                text: userInput
-            }];
+            // Initial User Message
+            let currentMessageParts = [...imageParts, { text: userInput }];
+            
+            // --- THE TOOL LOOP ---
+            let finalResponse = "";
+            let iterations = 0;
+            const MAX_ITERATIONS = 5; // Prevent infinite loops
 
-            const response = await chat.sendMessage({
-                message: userContent
-            });
-            let text = response.text;
+            while (iterations < MAX_ITERATIONS) {
+                iterations++;
 
-            text = text?.trim() || "";
+                // 1. Send message to Gemini
+                const response = await chat.sendMessage({
+                    message: currentMessageParts
+                });
+                
+                let text = response.response.text().trim();
+                
+                // 2. Check for [MW_SEARCH: ...]
+                const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
+                if (searchMatch) {
+                    const query = searchMatch[1].trim();
+                    console.log(`[Tool] Searching for: ${query}`);
+                    
+                    const searchResults = await performSearch(query);
+                    
+                    // Feed result back to Gemini
+                    currentMessageParts = [{ 
+                        text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` 
+                    }];
+                    
+                    // Don't display the tool call to the user yet, loop again
+                    continue; 
+                }
 
-            // Remove [THOUGHT]...[/THOUGHT] and [HISTORY,...] markers
-            text = text.replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
-                .replace(/\n\s*\n/g, "\n") // clean up extra blank lines
+                // 3. Check for [MW_CONTENT: ...]
+                const contentMatch = text.match(/\[MW_CONTENT:\s*(.*?)\]/i);
+                if (contentMatch) {
+                    const requestedTitle = contentMatch[1].trim();
+                    console.log(`[Tool] Fetching content for: ${requestedTitle}`);
+
+                    // Use canonical title finder to ensure we get the right page
+                    const canonical = await findCanonicalTitle(requestedTitle) || requestedTitle;
+                    const content = await getWikiContent(canonical);
+                    
+                    const resultText = content 
+                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 4000)}` // Limit length to avoid token overflow
+                        : `[SYSTEM] Page "${requestedTitle}" not found or empty. Try a different search.`;
+
+                    // Feed content back to Gemini
+                    currentMessageParts = [{ text: resultText }];
+                    continue;
+                }
+
+                // 4. No tags found? This is the final answer.
+                finalResponse = text;
+                break;
+            }
+
+            // Clean up internal thoughts if any remain
+            finalResponse = finalResponse
+                .replace(/\[MW_SEARCH:.*?\]/g, "")
+                .replace(/\[MW_CONTENT:.*?\]/g, "")
+                .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
                 .trim();
 
-            // Limit to ~2000 characters without cutting words
-            if (text.length > 1997) {
-                const cutoff = text.slice(0, 1997);
-                const lastSpace = cutoff.lastIndexOf(" ");
-                text = cutoff.slice(0, lastSpace > 0 ? lastSpace : 1997).trim() + "...";
-            }
-
-            addToHistory(channelId, "model", text, "Derivative");
-            
-            return text;
+            addToHistory(channelId, "model", finalResponse, "Derivative");
+            return finalResponse;
         });
     } catch (err) {
-        console.error("Gemini chat error for Derivative");
-        if (message?.channel) {
-            try {
-                // await message.channel.send(`⚠️ Gemini chat error for Derivative:\n\`\`\`${err.message || err}\`\`\``);
-            } catch (sendErr) {
-                console.error("Failed to send error message:", sendErr);
-            }
-        }
+        console.error("Gemini Loop Error:", err);
         return MESSAGES.aiServiceError;
     }
 }
