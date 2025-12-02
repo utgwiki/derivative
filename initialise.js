@@ -47,7 +47,7 @@ const {
 
 // --- FREE WILL CONFIGURATION ---
 const IGNORED_CHANNELS = ["bulletin", "announcements", "rules", "updates", "logs"];
-const TRIGGER_KEYWORDS = ["derivative", "deriv"];
+const TRIGGER_KEYWORDS = ["h3lp3r", "wikith1nk3r", "helper", "wikithinker"];
 const RESPONSE_CHANCE = 0.4; // 40% chance to respond to keywords if not pinged directly
 
 // --- FOLLOW-UP STATE MANAGER ---
@@ -246,23 +246,23 @@ const STATUS_OPTIONS = [{
     },
     {
         type: ActivityType.Custom,
-        text: "check out tagging.wiki!"
+        text: "check out sewh.miraheze.org!"
     },
     {
         type: ActivityType.Playing,
-        text: "untitled tag game"
+        text: "sewh"
     },
     {
         type: ActivityType.Listening,
-        text: "crashout by nicopatty"
+        text: "sewh ost"
     }, // Listening = 2
     {
         type: ActivityType.Watching,
-        text: "Special:RecentChanges - tagging.wiki"
+        text: "Special:RecentChanges - sewh.miraheze.org"
     }, // Watching = 3
     {
         type: ActivityType.Competing,
-        text: "Untitled Tag Game"
+        text: "Something Evil Will Happen"
     }, // Competing = 5
 ];
 
@@ -325,7 +325,7 @@ client.once("ready", async () => {
     try {
         await client.application.commands.create(
             new ContextMenuCommandBuilder()
-            .setName("Ask Derivative...")
+            .setName("Ask H3LP3R...")
             .setType(ApplicationCommandType.Message)
             .setContexts([
                 0, // Guild (Server)
@@ -442,7 +442,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             const buildWikiUrl = (foundTitle) => {
                 const [pageOnly, frag] = String(foundTitle).split("#");
                 const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
-                return `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+                return `https://sewh.miraheze.org/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
             };
             
             const urls = uniqueResolved.map(buildWikiUrl);
@@ -624,7 +624,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     try {
                         const [pageOnly, frag] = String(explicitTemplateFoundTitle).split("#");
                         const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
-                        const pageUrl = `https://tagging.wiki/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+                        const pageUrl = `https://sewh.miraheze.org/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
                         const row = new ActionRowBuilder();
                         const btn = new ButtonBuilder()
                             .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
@@ -915,7 +915,7 @@ client.on("messageCreate", async (message) => {
 
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isMessageContextMenuCommand()) return;
-    if (interaction.commandName !== "Ask Derivative...") return;
+    if (interaction.commandName !== "Ask H3LP3R...") return;
 
     logMessage(
         interaction.channelId,
@@ -925,7 +925,7 @@ client.on("interactionCreate", async (interaction) => {
     
     const modal = new ModalBuilder()
         .setCustomId("deriv_modal")
-        .setTitle("Ask Derivative");
+        .setTitle("Ask H3LP3R");
 
     const textInput = new TextInputBuilder()
         .setCustomId("user_question")
