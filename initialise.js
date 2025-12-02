@@ -221,7 +221,7 @@ async function scheduleFollowUp(message) {
             
             // Call handleUserRequest but pretend it's a system prompt
             // pass a flag to indicate this is a self-prompt
-            await handleUserRequest(systemNote, mockMessage, false, true);
+            await handleUserRequest(systemNote, systemNote, mockMessage, false, true);
 
         } catch (err) {
             console.error("Follow-up execution failed:", err);
@@ -365,7 +365,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
     } else if (messageOrInteraction.targetMessage) {
         // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.targetMessage;
-    } else if (messageOrInteraction.client._selectedMessage) {
+    } else if (messageOrInteraction.client?._selectedMessage) {
         // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.client._selectedMessage;
     }
