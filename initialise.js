@@ -45,6 +45,19 @@ const {
     ApplicationCommandType
 } = require("discord.js");
 
+// --- FREE WILL CONFIGURATION ---
+const IGNORED_CHANNELS = ["bulletin", "announcements", "rules", "updates", "logs"];
+const TRIGGER_KEYWORDS = ["h3lp3r", "wikith1nk3r", "helper", "wikithinker"];
+const RESPONSE_CHANCE = 0.4; // 40% chance to respond to keywords if not pinged directly
+
+// --- FOLLOW-UP STATE MANAGER ---
+// Stores: { channelId: { timer: Timeout, lastInteraction: Date } }
+const activeConversations = new Map(); 
+
+// 10 seconds to 5 minutes (in milliseconds)
+const MIN_FOLLOWUP_DELAY = 10 * 1000; // 10 seconds
+const MAX_FOLLOWUP_DELAY = 5 * 60 * 1000; // 5 minutes
+
 // node-fetch wrapper 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
@@ -152,6 +165,73 @@ function safeSend(ctx, payload) {
     } catch (err) {
         console.error("safeSend error:", err);
     }
+}
+
+// FOLLOW UP MESSAGES
+const { getHistory } = require("./functions/conversation.js"); 
+
+async function scheduleFollowUp(message) {
+    const channelId = message.channel.id;
+
+    // Clear existing timer if talking (reset the clock)
+    if (activeConversations.has(channelId)) {
+        clearTimeout(activeConversations.get(channelId).timer);
+    }
+
+    // Decide if we want to follow up (Random chance: 50%)
+    // Only follow up in DMs or if the user specifically engaged recently
+    if (Math.random() < 0.5) return; 
+
+    // Calculate random delay
+    const delay = Math.floor(Math.random() * (MAX_FOLLOWUP_DELAY - MIN_FOLLOWUP_DELAY + 1)) + MIN_FOLLOWUP_DELAY;
+    
+    // console.log(`Scheduling follow-up for ${channelId} in ${(delay/60000).toFixed(2)} minutes.`);
+
+    const timer = setTimeout(async () => {
+        try {
+            // Check if the channel still exists
+            const channel = await client.channels.fetch(channelId).catch(() => null);
+            if (!channel) return;
+
+            // Get history to ensure we have context
+            const history = getHistory(channelId);
+            if (!history || history.length < 2) return; // Don't follow up on empty interactions
+
+            // Construct the "Proactive" prompt
+            const delayText = delay < 60000 
+                ? `${Math.round(delay/1000)} seconds` 
+                : `${Math.round(delay/60000)} minutes`;
+            const systemNote = `[SYSTEM: It has been ${delayText} since you last spoke. 
+            The user hasn't replied. 
+            Construct a short, casual follow-up message based on the previous conversation context above. 
+            Ask how they are, or bring up a related topic from the history. 
+            Do NOT greet them like it's the first time. 
+            If the last conversation ended naturally (like "bye"), do not send anything and output [TERMINATE_MESSAGE].]`;
+
+            const mockMessage = {
+                channel: channel,
+                author: client.user,
+                client: client,        // Added: Needed for handleUserRequest checks
+                attachments: { size: 0 }, // Added: Pass attachment check safely
+                content: systemNote,
+                guild: channel.guild
+            };
+            
+            // Call handleUserRequest but pretend it's a system prompt
+            // pass a flag to indicate this is a self-prompt
+            await handleUserRequest(systemNote, systemNote, mockMessage, false, true);
+
+        } catch (err) {
+            console.error("Follow-up execution failed:", err);
+        } finally {
+            activeConversations.delete(channelId);
+        }
+    }, delay);
+
+    activeConversations.set(channelId, {
+        timer: timer,
+        lastInteraction: Date.now()
+    });
 }
 
 // -------------------- STATUS --------------------
@@ -267,9 +347,9 @@ client.once("ready", async () => {
 });
 
 // -------------------- HANDLER --------------------
-async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = false) {
+async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, isEphemeral = false, isProactive = false) {
     // 1. Initial validation
-    if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
+    if (!promptMsg || !promptMsg.trim()) return MESSAGES.noAIResponse;
 
     // Determine if we're dealing with a Message or an Interaction to use the correct reply method
     const isInteraction = interaction =>
@@ -283,7 +363,7 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
     } else if (messageOrInteraction.targetMessage) {
         // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.targetMessage;
-    } else if (messageOrInteraction.client._selectedMessage) {
+    } else if (messageOrInteraction.client?._selectedMessage) {
         // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.client._selectedMessage;
     }
@@ -295,7 +375,6 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
     let typingInterval;
     if (contextMessage.channel?.sendTyping) {
         messageOrInteraction.channel.sendTyping().catch(() => {});
-        // Keep sending typing every 8 seconds
         typingInterval = setInterval(() => messageOrInteraction.channel.sendTyping().catch(() => {}), 8000);
     }
 
@@ -314,7 +393,7 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
 
         // 2. Check for image links in the message content (which uses userMsg)
         const urlRegex = /(https?:\/\/[^\s]+?\.(jpe?g|png|gif|webp))/gi;
-        const matches = [...userMsg.matchAll(urlRegex)];
+        const matches = [...rawUserMsg.matchAll(urlRegex)];
         matches.forEach(match => imageURLs.push(match[0]));
 
         const uniqueImageURLs = [...new Set(imageURLs)].slice(0, 5); // Max 5 images
@@ -329,16 +408,16 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
 
         // C. Update userMsg if images are present (as discussed in the previous answer)
         if (imageParts.length > 0) {
-            if (!userMsg.trim()) {
-                userMsg = "What is in this image, and how does it relate to the wiki on https://sewh.miraheze.org?";
+            if (!promptMsg.trim()) {
+                promptMsg = "What is in this image, and how does it relate to the wiki on https://sewh.miraheze.org?";
             } else {
-                userMsg = `Analyze the attached image(s) in the context of the following request: ${userMsg}`;
+                promptMsg = `Analyze the attached image(s) in the context of the following request: ${promptMsg}`;
             }
         }
 
         // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
         const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
-        const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
+        const linkMatches = [...rawUserMsg.matchAll(wikiLinkRegex)];
         if (linkMatches.length) {
             const resolved = [];
             for (const m of linkMatches) {
@@ -385,19 +464,15 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
-        const templateMatch = userMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
+        const templateMatch = rawUserMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
 
         let shouldUseComponentsV2 = false;
         let skipGemini = false;
         
         if (templateMatch) {
-            shouldUseComponentsV2 = true;
-            skipGemini = true;
-            
             let rawTemplate = templateMatch[1].trim();
             let sectionName = null;
         
-            // Detect {{Page#Section}} form
             if (rawTemplate.includes("#")) {
                 const [page, section] = rawTemplate.split("#");
                 rawTemplate = page.trim();
@@ -406,44 +481,43 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         
             const canonical = await findCanonicalTitle(rawTemplate);
             
-            if (!canonical) {
-                shouldUseComponentsV2 = false;
-                explicitTemplateContent = "I don't know.";
-            } else {
+            if (canonical) {
+                // ✅ Page FOUND: We assume user wants the content.
+                shouldUseComponentsV2 = true;
+                skipGemini = true; // Skip AI
                 explicitTemplateFoundTitle = canonical;
 
                 if (sectionName) {
                     explicitTemplateContent = await getSectionContent(canonical, sectionName);
                 } else {
-                    // Replace getLeadSection() with a clean extract API call
                     const extractRes = await fetch(
                         `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
                     );
-                    
                     const extractJson = await extractRes.json();
                     const pageObj = Object.values(extractJson.query.pages)[0];
                     explicitTemplateContent = pageObj.extract || "No content available.";
                 }
+                explicitTemplateName = rawTemplate;
+            } else {
+                // The user might be asking "How do I use {{Template}}?"
+                // DO NOT trigger skipGemini. Let the AI handle it.
+                // We do nothing here, letting code proceed to askGemini.
+                console.log(`Template pattern found "${rawTemplate}" but no page exists. Falling back to Gemini.`);
             }
-        
-            explicitTemplateName = rawTemplate;
         }
 
         // ---- page ----
         let pageTitles = [];
         let wikiContent = "";
         
-        // 💡 UPDATED LOGIC: Checking skipGemini to prevent unnecessary calls
         if (skipGemini) {
-            // We are in template mode. 
-            // If we found a title, assign it to pageTitles so image fetching works later.
             if (explicitTemplateFoundTitle) {
                 pageTitles = [explicitTemplateFoundTitle];
             }
-            // We intentionally do NOT call askGeminiForPages here.
         } else {
             // Normal operation (non-template mode)
-            pageTitles = await askGeminiForPages(userMsg);
+            // Use rawUserMsg for page search to avoid noise from context
+            pageTitles = await askGeminiForPages(rawUserMsg); 
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
                     if (knownPages.includes(pageTitle)) { 
@@ -458,7 +532,7 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         
         if (!skipGemini) {  
             reply = await askGemini(
-                userMsg,
+                promptMsg, // Send the Full Context to Gemini
                 wikiContent || undefined,
                 pageTitles.join(", ") || undefined,
                 imageParts,
@@ -609,11 +683,15 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
                     const firstChunk = botTaggedChunks.shift();
                     if (firstChunk) {
                         if (isInteraction(messageOrInteraction)) {
-                            await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
-                        } else {
-                            // Message-based reply
-                            await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
-                        }
+                                await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
+                            } else {
+                                // Message-based reply (Safe Check)
+                                if (typeof messageOrInteraction.reply === 'function') {
+                                    await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
+                                } else {
+                                    await messageOrInteraction.channel.send({ ...replyOptions, content: firstChunk });
+                                }
+                            }
                     }
         
                     // 2. Send the rest as follow-ups/channel sends with a delay
@@ -648,7 +726,12 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
                     if (isInteraction(messageOrInteraction)) {
                         await messageOrInteraction.editReply(fallbackOptions);
                     } else {
-                        await messageOrInteraction.reply(fallbackOptions);
+                        // Safe fallback for mock messages
+                        if (typeof messageOrInteraction.reply === 'function') {
+                            await messageOrInteraction.reply(fallbackOptions);
+                        } else {
+                            await messageOrInteraction.channel.send(fallbackOptions);
+                        }
                     }
                 } else {
                     // For subsequent messages, we use a plain channel/interaction follow-up
@@ -713,18 +796,40 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
+    // If the channel name contains blocked words, ignore completely
+    if (message.channel.name) {
+        const lowerName = message.channel.name.toLowerCase();
+        if (IGNORED_CHANNELS.some(blocked => lowerName.includes(blocked))) return;
+    }
+    
     logMessage(
         message.channel.id,
         message.author.username,
         message.content
     );
 
-    let userMsg = message.content.trim(); 
-    if (!userMsg) return;
+    let rawUserMsg = message.content.trim(); // The clean input for Logic
+    let promptMsg = rawUserMsg;              // The input + context for Gemini
+    
+    if (!rawUserMsg) return;
 
     const isDM = !message.guild;
     const mentioned = message.mentions.has(client.user);
 
+    // FREE WILL Keyword Detection 
+    let keywordTriggered = false;
+    if (!mentioned && !isDM) {
+        const lowerContent = rawUserMsg.toLowerCase();
+        const hasKeyword = TRIGGER_KEYWORDS.some(kw => lowerContent.includes(kw));
+        
+        // If keyword found, roll the dice
+        if (hasKeyword) {
+            if (Math.random() < RESPONSE_CHANCE) {
+                keywordTriggered = true;
+            }
+        }
+    }
+    
     let isReply = false;
     if (message.reference) {
         try {
@@ -735,12 +840,12 @@ client.on("messageCreate", async (message) => {
 
     const hasWikiSyntax = /\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content);
 
-    // Fire only if: DM, Mention, Reply to bot, OR message contains {{ }} or [[ ]]
-    if (!(isDM || mentioned || isReply || hasWikiSyntax)) return;
+    // Respond if meets all conditions
+    if (!(isDM || mentioned || isReply || hasWikiSyntax || keywordTriggered)) return;
 
     // If the user mentions the bot but writes very little (e.g. "@Derivative"), 
     // they probably want us to read the message strictly before it.
-    const cleanContent = userMsg.replace(/<@!?\d+>/g, "").trim();
+    const cleanContent = rawUserMsg.replace(/<@!?\d+>/g, "").trim();
     
     // Case 1: User is Replying to a specific message using Discord Reply
     if (message.reference) {
@@ -750,7 +855,7 @@ client.on("messageCreate", async (message) => {
             // Make sure the referenced message has text content
             if (referencedMessage.content) {
                 const contextHeader = `[SYSTEM: I am replying to ${referencedMessage.author.username}'s message: "${referencedMessage.content}"]`;
-                userMsg = `${contextHeader}\n\n${userMsg}`;
+                promptMsg = `${contextHeader}\n\n${rawUserMsg}`;
             }
         } catch (err) {
             console.error("Failed to fetch reply context:", err);
@@ -758,7 +863,7 @@ client.on("messageCreate", async (message) => {
     } 
     // Case 2: General question (No Reply, No Image) - "Is this true?", "Explain", etc.
     // We fetch the last 5 human messages to give the bot context of the conversation.
-    else if (message.attachments.size === 0 && !userMsg.match(/(https?:\/\/[^\s]+)/g)) {
+    else if (message.attachments.size === 0 && !rawUserMsg.match(/(https?:\/\/[^\s]+)/g)) {
         try {
             // 1. Fetch last 15 messages (to ensure we get 5 humans after filtering bots)
             // 'before: message.id' ensures we don't fetch the current command itself
@@ -776,10 +881,8 @@ client.on("messageCreate", async (message) => {
                     .map(m => `[User: ${m.author.username}]: ${m.content}`)
                     .join("\n");
 
-                const contextBlock = `[SYSTEM: Here is the recent conversation context in this channel. Use this if my request is vague like "is this true?" or "explain":\n${contextLog}\n]`;
-
-                // 4. Prepend to the actual user message
-                userMsg = `${contextBlock}\n\n${userMsg}`;
+                const contextBlock = `[SYSTEM: Here is the recent conversation context...:\n${contextLog}\n]`;
+                promptMsg = `${contextBlock}\n\n${rawUserMsg}`;
             }
         } catch (err) {
             console.error("Failed to fetch channel context:", err);
@@ -787,7 +890,7 @@ client.on("messageCreate", async (message) => {
     }
     
     // If content is empty/short AND it's not a direct reply to a specific message
-    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM && !userMsg.includes("[SYSTEM:")) {
+    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM && !rawUserMsg.includes("[SYSTEM:")) {
         try {
             // Fetch last 2 messages (Current + Previous)
             const messages = await message.channel.messages.fetch({ limit: 2 });
@@ -797,7 +900,7 @@ client.on("messageCreate", async (message) => {
                 // Ensure previous message isn't a bot and has text
                 if (previousMessage && !previousMessage.author.bot && previousMessage.content) {
                     // Prepend the context so Gemini sees: "Previous text... [User Ping]"
-                    userMsg = `${previousMessage.content}\n\n[System Note: User pinged you regarding the text above]`;
+                    promptMsg = `${previousMessage.content}\n\n[System Note: User pinged you regarding the text above]`;
                 }
             }
         } catch (err) {
@@ -805,7 +908,12 @@ client.on("messageCreate", async (message) => {
         }
     }
 
-    await handleUserRequest(userMsg, message);
+    await handleUserRequest(promptMsg, rawUserMsg, message);
+
+    // Only schedule if it's a DM or the user explicitly pinged/replied (showing interest)
+    if (isDM || mentioned || isReply) {
+        scheduleFollowUp(message);
+    }
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -877,7 +985,7 @@ client.on("interactionCreate", async (interaction) => {
         ephemeral: ephemeralSetting
     });
     
-    await handleUserRequest(userPrompt, interaction, ephemeralSetting);
+    await handleUserRequest(userPrompt, userPrompt, interaction, ephemeralSetting);
 });
 
 client.login(DISCORD_TOKEN);

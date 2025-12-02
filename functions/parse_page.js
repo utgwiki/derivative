@@ -187,7 +187,7 @@ async function getWikiContent(pageTitle) {
     try {
         const res = await fetch(`${API}?${params.toString()}`, {
             headers: {
-                "User-Agent": "DiscordBot/H3LP3R",
+                "User-Agent": "DiscordBot/Deriv",
                 "Origin": "https://sewh.miraheze.org",
             },
         });
@@ -393,6 +393,34 @@ async function parseTemplates(text) {
     return result;
 }
 
+async function performSearch(query) {
+    const params = new URLSearchParams({
+        action: "query",
+        list: "search",
+        srsearch: query,
+        format: "json"
+    });
+
+    try {
+        const res = await fetch(`${API}?${params.toString()}`, {
+            headers: { "User-Agent": "DiscordBot/Deriv" }
+        });
+        
+        if (!res.ok) throw new Error("Search failed");
+        
+        const json = await res.json();
+        const results = json.query?.search || [];
+        
+        if (results.length === 0) return "No results found.";
+
+        // Return a list of titles
+        return results.map(r => r.title).join(", ");
+    } catch (err) {
+        console.error("Search API error:", err);
+        return "Error searching wiki.";
+    }
+}
+
 module.exports = { 
     API, 
     knownPages, 
@@ -402,5 +430,6 @@ module.exports = {
     getSectionContent, 
     getLeadSection, 
     parseWikiLinks, 
-    parseTemplates 
+    parseTemplates,
+    performSearch
 };
