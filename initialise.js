@@ -198,7 +198,10 @@ async function scheduleFollowUp(message) {
             if (!history || history.length < 2) return; // Don't follow up on empty interactions
 
             // Construct the "Proactive" prompt
-            const systemNote = `[SYSTEM: It has been ${(delay/60000).toFixed(0)} minutes since you last spoke. 
+            const delayText = delay < 60000 
+                ? `${Math.round(delay/1000)} seconds` 
+                : `${Math.round(delay/60000)} minutes`;
+            const systemNote = `[SYSTEM: It has been ${delayText} since you last spoke. 
             The user hasn't replied. 
             Construct a short, casual follow-up message based on the previous conversation context above. 
             Ask how they are, or bring up a related topic from the history. 
