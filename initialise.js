@@ -205,6 +205,7 @@ async function scheduleFollowUp(message) {
             The user hasn't replied. 
             Construct a short, casual follow-up message based on the previous conversation context above. 
             Ask how they are, or bring up a related topic from the history. 
+            You are also allowed to make a new topic with what you know about the conversation. You are not limited in talking about the current topic.
             Do NOT greet them like it's the first time. 
             If the last conversation ended naturally (like "bye"), do not send anything and output [TERMINATE_MESSAGE].]`;
 
