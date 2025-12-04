@@ -45,18 +45,18 @@ const {
     ApplicationCommandType
 } = require("discord.js");
 
-// --- FREE WILL CONFIGURATION ---
-const IGNORED_CHANNELS = ["bulletin", "announcements", "rules", "updates", "logs"];
-const TRIGGER_KEYWORDS = ["h3lp3r", "wikith1nk3r", "helper", "wikithinker"];
-const RESPONSE_CHANCE = 0.4; // 40% chance to respond to keywords if not pinged directly
+const { BOT_SETTINGS, STATUS_OPTIONS, WIKI_ENDPOINTS, BOT_NAME } = require("./config.js");
+const { 
+    IGNORED_CHANNELS, 
+    TRIGGER_KEYWORDS, 
+    RESPONSE_CHANCE, 
+    MIN_FOLLOWUP_DELAY, 
+    MAX_FOLLOWUP_DELAY 
+} = BOT_SETTINGS;
 
 // --- FOLLOW-UP STATE MANAGER ---
 // Stores: { channelId: { timer: Timeout, lastInteraction: Date } }
 const activeConversations = new Map(); 
-
-// 10 seconds to 5 minutes (in milliseconds)
-const MIN_FOLLOWUP_DELAY = 10 * 1000; // 10 seconds
-const MAX_FOLLOWUP_DELAY = 5 * 60 * 1000; // 5 minutes
 
 // node-fetch wrapper 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -205,6 +205,7 @@ async function scheduleFollowUp(message) {
             The user hasn't replied. 
             Construct a short, casual follow-up message based on the previous conversation context above. 
             Ask how they are, or bring up a related topic from the history. 
+            You are also allowed to make a new topic with what you know about the conversation. You are not limited in talking about the current topic.
             Do NOT greet them like it's the first time. 
             If the last conversation ended naturally (like "bye"), do not send anything and output [TERMINATE_MESSAGE].]`;
 
@@ -235,40 +236,6 @@ async function scheduleFollowUp(message) {
 }
 
 // -------------------- STATUS --------------------
-const STATUS_OPTIONS = [{
-        type: ActivityType.Custom,
-        text: "just send [[a page]] and i'll appear!"
-    }, // Playing = 0
-    {
-        type: ActivityType.Custom,
-        text: "just send {{a page}} and i'll appear!"
-    },
-    {
-        type: ActivityType.Custom,
-        text: "dms are open!"
-    },
-    {
-        type: ActivityType.Custom,
-        text: "check out sewh.miraheze.org!"
-    },
-    {
-        type: ActivityType.Playing,
-        text: "sewh"
-    },
-    {
-        type: ActivityType.Listening,
-        text: "sewh ost"
-    }, // Listening = 2
-    {
-        type: ActivityType.Watching,
-        text: "Special:RecentChanges - sewh.miraheze.org"
-    }, // Watching = 3
-    {
-        type: ActivityType.Competing,
-        text: "Something Evil Will Happen"
-    }, // Competing = 5
-];
-
 const STATUS_INTERVAL_MINUTES = 1;
 const STATUS_INTERVAL_MS = STATUS_INTERVAL_MINUTES * 60 * 1000;
 
@@ -328,7 +295,7 @@ client.once("ready", async () => {
     try {
         await client.application.commands.create(
             new ContextMenuCommandBuilder()
-            .setName("Ask H3LP3R...")
+            .setName(`Ask ${BOT_NAME}...`)
             .setType(ApplicationCommandType.Message)
             .setContexts([
                 0, // Guild (Server)
@@ -340,7 +307,7 @@ client.once("ready", async () => {
                 1 // User Install (crucial for "use everywhere" functionality)
             ])
         );
-        console.log("✅ Registered global context menu: Ask Derivative");
+        console.log(`✅ Registered global context menu: Ask ${BOT_NAME}`);
     } catch (err) {
         console.error("Failed to register context command:", err);
     }
@@ -361,10 +328,10 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         // This is a direct Message object from messageCreate
         message = messageOrInteraction;
     } else if (messageOrInteraction.targetMessage) {
-        // This is a Context Menu Interaction (like 'Ask Bestiary...')
+        // This is a Context Menu Interaction (like 'Ask...')
         message = messageOrInteraction.targetMessage;
     } else if (messageOrInteraction.client?._selectedMessage) {
-        // This is a Context Menu Interaction (like 'Ask Bestiary...')
+        // This is a Context Menu Interaction (like 'Ask...')
         message = messageOrInteraction.client._selectedMessage;
     }
     // If 'message' is null here, it means no message object is available for attachment checks.
@@ -409,7 +376,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         // C. Update userMsg if images are present (as discussed in the previous answer)
         if (imageParts.length > 0) {
             if (!promptMsg.trim()) {
-                promptMsg = "What is in this image, and how does it relate to the wiki on https://sewh.miraheze.org?";
+                promptMsg = `What is in this image, and how does it relate to the wiki on ${WIKI_ENDPOINTS.BASE}?`;
             } else {
                 promptMsg = `Analyze the attached image(s) in the context of the following request: ${promptMsg}`;
             }
@@ -445,7 +412,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             const buildWikiUrl = (foundTitle) => {
                 const [pageOnly, frag] = String(foundTitle).split("#");
                 const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
-                return `https://sewh.miraheze.org/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+                return `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
             };
             
             const urls = uniqueResolved.map(buildWikiUrl);
@@ -627,7 +594,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     try {
                         const [pageOnly, frag] = String(explicitTemplateFoundTitle).split("#");
                         const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
-                        const pageUrl = `https://sewh.miraheze.org/wiki/${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+                        const pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
                         const row = new ActionRowBuilder();
                         const btn = new ButtonBuilder()
                             .setLabel(String(explicitTemplateFoundTitle).slice(0, 80))
@@ -918,7 +885,7 @@ client.on("messageCreate", async (message) => {
 
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isMessageContextMenuCommand()) return;
-    if (interaction.commandName !== "Ask H3LP3R...") return;
+    if (interaction.commandName !== `Ask ${BOT_NAME}...`) return;
 
     logMessage(
         interaction.channelId,
@@ -928,7 +895,7 @@ client.on("interactionCreate", async (interaction) => {
     
     const modal = new ModalBuilder()
         .setCustomId("deriv_modal")
-        .setTitle("Ask H3LP3R");
+        .setTitle(`Ask ${BOT_NAME}`);
 
     const textInput = new TextInputBuilder()
         .setCustomId("user_question")
