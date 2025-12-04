@@ -2,7 +2,7 @@ require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
 const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
-const { getSystemInstruction } = require("../config.js");
+const { getSystemInstruction, BOT_NAME } = require("../config.js");
 
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -32,7 +32,7 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     // historyArray is an array of { memberName: '...', message: '...' } objects
     const geminiHistory = historyArray.map(log => {
         // Determine role: use 'user' unless memberName is explicitly 'Derivative'
-        const role = log.memberName.toLowerCase() === 'derivative' ? 'model' : 'user';
+        const role = log.memberName.toLowerCase() === `${BOT_NAME.toLowerCase()}` ? 'model' : 'user';
         
         // Reconstruct the prefixed text as expected by the system instruction
         const username = role === 'user' ? log.memberName : null;
@@ -120,7 +120,7 @@ If none are relevant, return "NONE".`;
         )].slice(0, 5);
 
     } catch (err) {
-        console.error("Gemini page selection error for Derivative: ", err);
+        console.error(`Gemini page selection error for ${BOT_NAME}: `, err);
         return [];
     }
 }
@@ -249,7 +249,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
                 .trim();
 
-            addToHistory(channelId, "model", finalResponse, "Derivative");
+            addToHistory(channelId, "model", finalResponse, BOT_NAME);
             return finalResponse;
         });
     } catch (err) {
