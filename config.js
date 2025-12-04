@@ -121,6 +121,8 @@ Today is ${currentMonth} ${day}, ${currentYear}.`;
 }
 
 module.exports = {
+    BOT_NAME,
+    GEMINI_MODEL,
     WIKI_ENDPOINTS,
     BOT_SETTINGS,
     STATUS_OPTIONS,
