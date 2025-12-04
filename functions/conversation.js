@@ -2,7 +2,7 @@ require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
 const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
-const { getSystemInstruction, BOT_NAME } = require("../config.js");
+const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js");
 
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -104,7 +104,7 @@ If none are relevant, return "NONE".`;
 
     try {
         const result = await gemini.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: GEMINI_MODEL,
             contents: prompt,
             maxOutputTokens: 100,
         });
@@ -172,7 +172,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
     try {
         return await runWithMainKeys(async (gemini) => {
             const chat = gemini.chats.create({
-                model: "gemini-2.5-flash", 
+                model: GEMINI_MODEL, 
                 maxOutputTokens: 2500,
                 config: { 
                     systemInstruction: sysInstr,
