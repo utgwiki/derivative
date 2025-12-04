@@ -2,6 +2,7 @@
 // Change this URL to switch wikis. 
 // Ensure no trailing slash.
 const WIKI_BASE_URL = "https://tagging.wiki"; 
+
 const GAME_TOPIC = "Untitled Tag Game"; 
 const BOT_NAME = "Derivative"; 
 
@@ -24,6 +25,8 @@ const BOT_SETTINGS = {
     MIN_FOLLOWUP_DELAY: 10 * 1000,
     MAX_FOLLOWUP_DELAY: 5 * 60 * 1000,
 };
+
+const GEMINI_MODEL = "gemini-2.5-flash"; 
 
 // --- DISCORD STATUSES ---
 // Note: ActivityType is imported in initialise.js, so we keep these simple here
