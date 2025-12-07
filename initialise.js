@@ -215,7 +215,8 @@ async function scheduleFollowUp(message) {
                 client: client,        // Added: Needed for handleUserRequest checks
                 attachments: { size: 0 }, // Added: Pass attachment check safely
                 content: systemNote,
-                guild: channel.guild
+                guild: channel.guild,
+                createdTimestamp: Date.now() // Mock timestamp for follow-up
             };
             
             // Call handleUserRequest but pretend it's a system prompt
@@ -769,10 +770,12 @@ client.on("messageCreate", async (message) => {
         if (IGNORED_CHANNELS.some(blocked => lowerName.includes(blocked))) return;
     }
     
+    // LOGGING WITH TIMESTAMP
     logMessage(
         message.channel.id,
         message.author.username,
-        message.content
+        message.content,
+        message.createdTimestamp // Pass timestamp
     );
 
     let rawUserMsg = message.content.trim(); // The clean input for Logic
@@ -890,7 +893,8 @@ client.on("interactionCreate", async (interaction) => {
     logMessage(
         interaction.channelId,
         interaction.user.username,
-        interaction.targetMessage?.content || "[No content]"
+        interaction.targetMessage?.content || "[No content]",
+        interaction.createdTimestamp // Pass timestamp
     );
     
     const modal = new ModalBuilder()
@@ -938,7 +942,8 @@ client.on("interactionCreate", async (interaction) => {
     logMessage(
         interaction.channelId,
         interaction.user.username,
-        userPrompt
+        userPrompt,
+        interaction.createdTimestamp // Pass timestamp
     );
     
     const isPrivateChannel = interaction.channel &&
