@@ -213,11 +213,31 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                const response = await chat.sendMessage({
+                const result = await chat.sendMessage({
                     message: currentMessageParts
                 });
                 
-                let text = response.text.trim();
+                // 💡 SAFELY EXTRACT TEXT
+                let text = "";
+                try {
+                    if (typeof result.text === 'function') {
+                        // Standard SDK: result.response.text() or result.text()
+                        text = result.text(); 
+                    } else if (result.response && typeof result.response.text === 'function') {
+                        text = result.response.text();
+                    } else if (result.candidates && result.candidates[0] && result.candidates[0].content) {
+                        // Raw candidate access
+                         text = result.candidates[0].content.parts.map(p => p.text).join("");
+                    } else if (typeof result.text === 'string') {
+                         text = result.text;
+                    }
+                } catch (e) {
+                     // Sometimes text() throws if safety blocks are triggered
+                     console.warn("Gemini response text extraction warning:", e);
+                }
+
+                // If text is still empty or undefined, handle gracefully
+                text = (text || "").trim();
                 
                 // 2. Check for [MW_SEARCH: ...]
                 const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
@@ -266,6 +286,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .replace(/\[MW_CONTENT:.*?\]/g, "")
                 .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
                 .trim();
+
+            // If completely empty (e.g. blocked content), return a fallback
+            if (!finalResponse) return MESSAGES.processingError;
 
             addToHistory(channelId, "model", finalResponse, BOT_NAME);
             return finalResponse;
