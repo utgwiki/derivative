@@ -23,7 +23,7 @@ const BOT_SETTINGS = {
     RESPONSE_CHANCE: 0.4,
     // Follow-up timing (ms)
     MIN_FOLLOWUP_DELAY: 10 * 1000,
-    MAX_FOLLOWUP_DELAY: 5 * 60 * 1000,
+    MAX_FOLLOWUP_DELAY: 60 * 60 * 1000,
 };
 
 const GEMINI_MODEL = "gemini-2.5-flash"; 
@@ -182,6 +182,8 @@ Do not output anything else if you choose to terminate.
     You: [MW_CONTENT: Tower Map]
     System: Content: The Tower Map is 500 studs high...
     You: The Tower map is 500 studs high!
+
+If there is no content on the wiki that helps, feel free to use Google and search the web.
 
 Do not mention these unless user specifically asks so:
 The next update occurs in ${hours} hours and ${minutes} minutes. Therefore, in your message say something like "The next update occurs <t:${nextUnix}:R>" which will translate to "The next update occurs in X minutes"
