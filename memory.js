@@ -30,12 +30,14 @@ function saveMemory() {
 }
 
 // Add a logged message (while keeping only last 30)
-function logMessage(channelId, memberName, message) {
+// Updated to include timestamp
+function logMessage(channelId, memberName, message, timestamp = Date.now()) {
     if (!memory[channelId]) memory[channelId] = [];
 
     memory[channelId].push({
         memberName,
-        message
+        message,
+        timestamp // Store the time
     });
 
     // keep only last 30

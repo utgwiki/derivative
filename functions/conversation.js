@@ -26,19 +26,29 @@ const MESSAGES = {
 // --- MEMORY ---
 const chatHistories = new Map();
 
+// Helper to format time for AI context
+function formatTime(timestamp) {
+    if (!timestamp) return new Date().toISOString();
+    return new Date(timestamp).toISOString();
+}
+
 // 💡 Initialize chatHistories from the persistedMemory object loaded from disk
 // Convert the simple log format into the Gemini history format upon startup.
 for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
-    // historyArray is an array of { memberName: '...', message: '...' } objects
+    // historyArray is an array of { memberName: '...', message: '...', timestamp: ... } objects
     const geminiHistory = historyArray.map(log => {
         // Determine role: use 'user' unless memberName is explicitly 'Derivative'
         const role = log.memberName.toLowerCase() === `${BOT_NAME.toLowerCase()}` ? 'model' : 'user';
         
         // Reconstruct the prefixed text as expected by the system instruction
         const username = role === 'user' ? log.memberName : null;
+        
+        // Add timestamp to context so AI knows when this happened
+        const timeStr = formatTime(log.timestamp);
+        
         const prefix = username 
-            ? `[${role}: ${username}]`
-            : `[${role}]`;
+            ? `[${role}: ${username}] [Time: ${timeStr}]`
+            : `[${role}] [Time: ${timeStr}]`;
 
         const fullText = `${prefix} ${log.message}`;
 
@@ -50,14 +60,16 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     chatHistories.set(channelId, geminiHistory);
 }
 
-function addToHistory(channelId, role, text, username = null) {
+function addToHistory(channelId, role, text, username = null, timestamp = Date.now()) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
+    const timeStr = formatTime(timestamp);
+
     // Prefix for AI-readable memory
     const prefix = username
-        ? `[${role}: ${username}]`
-        : `[${role}]`;
+        ? `[${role}: ${username}] [Time: ${timeStr}]`
+        : `[${role}] [Time: ${timeStr}]`;
 
     const fullText = `${prefix} ${text}`;
 
@@ -74,7 +86,7 @@ function addToHistory(channelId, role, text, username = null) {
 
     // Persist to disk via logMessage (from memory.js)
     const nameForJson = username || role.toUpperCase();
-    logMessage(channelId, nameForJson, text);
+    logMessage(channelId, nameForJson, text, timestamp);
 }
 
 // --- GEMINI FUNCTIONS ---
@@ -159,6 +171,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     const channelId = message?.channel?.id || "global";
     
+    // Extract timestamp from the message object if available, otherwise use now
+    const currentTimestamp = message?.createdTimestamp || Date.now();
+    const timeStr = formatTime(currentTimestamp);
+
     // 1. Build Initial System Prompt
     let sysInstr = getSystemInstruction();
     
@@ -184,7 +200,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             });
 
             // Initial User Message
-            let currentMessageParts = [...imageParts, { text: userInput }];
+            // Inject the timestamp into the user prompt so the AI knows "Now"
+            const timeContext = `[Time: ${timeStr}]`;
+            let currentMessageParts = [...imageParts, { text: `${timeContext} ${userInput}` }];
             
             // --- THE TOOL LOOP ---
             let finalResponse = "";
