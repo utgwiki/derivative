@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
-const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
+const { performSearch, getWikiContent, findCanonicalTitle, knownPages, getImagesOnPage, getAllImages } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js");
 
 // node-fetch
@@ -276,6 +276,37 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     continue;
                 }
 
+                // 3. Check for [MW_FETCH_IMAGES: ...]
+                const fetchImagesMatch = text.match(/\[MW_FETCH_IMAGES:\s*(.*?)\]/i);
+                if (fetchImagesMatch) {
+                    const requestedTitle = fetchImagesMatch[1].trim();
+                    console.log(`[Tool] Fetching images used on: ${requestedTitle}`);
+                    
+                    const imagesList = await getImagesOnPage(requestedTitle);
+                    
+                    // Truncate if list is massive to prevent context overflow
+                    const safeList = imagesList.length > 2000 ? imagesList.slice(0, 2000) + "... (truncated)" : imagesList;
+                    
+                    const resultText = `[SYSTEM] Images used on "${requestedTitle}":\n${safeList}`;
+                    currentMessageParts = [{ text: resultText }];
+                    continue;
+                }
+
+                // 4. Check for [MW_ALL_IMAGES]
+                const allImagesMatch = text.match(/\[MW_ALL_IMAGES\]/i);
+                if (allImagesMatch) {
+                    console.log(`[Tool] Fetching all wiki images...`);
+                    
+                    const allImagesList = await getAllImages();
+                    
+                    // Truncate if list is massive
+                    const safeList = allImagesList.length > 2000 ? allImagesList.slice(0, 2000) + "... (truncated)" : allImagesList;
+                    
+                    const resultText = `[SYSTEM] List of all images on wiki:\n${safeList}`;
+                    currentMessageParts = [{ text: resultText }];
+                    continue;
+                }
+                
                 // 4. No tags found? This is the final answer.
                 finalResponse = text;
                 break;
@@ -285,6 +316,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             finalResponse = finalResponse
                 .replace(/\[MW_SEARCH:.*?\]/g, "")
                 .replace(/\[MW_CONTENT:.*?\]/g, "")
+                .replace(/\[MW_FETCH_IMAGES:.*?\]/g, "") 
+                .replace(/\[MW_ALL_IMAGES\]/g, "")       
                 .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
                 .trim();
 
