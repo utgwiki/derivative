@@ -87,73 +87,6 @@ async function getAllPages() {
     }
 }
 
-// --- IMAGE FUNCTIONS ---
-
-async function getImagesOnPage(pageTitle) {
-    const canonical = await findCanonicalTitle(pageTitle) || pageTitle;
-    const params = new URLSearchParams({
-        action: "query",
-        prop: "images",
-        titles: canonical,
-        imlimit: "max",
-        format: "json"
-    });
-
-    try {
-        const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Ploob" }
-        });
-
-        if (!res.ok) throw new Error("Image fetch failed");
-        
-        const json = await res.json();
-        const pages = json.query?.pages;
-        if (!pages) return "No page found.";
-
-        // Extract images from the first page in the result
-        const pageId = Object.keys(pages)[0];
-        const images = pages[pageId]?.images || [];
-
-        if (images.length === 0) return "No images found on this page.";
-
-        // Return list of file titles (e.g., "File:Example.png")
-        return images.map(img => img.title).join(", ");
-
-    } catch (err) {
-        console.error("getImagesOnPage error:", err);
-        return "Error fetching images for this page.";
-    }
-}
-
-async function getAllImages() {
-    const params = new URLSearchParams({
-        action: "query",
-        list: "allimages",
-        ailimit: "max", // Usually limits to 500
-        format: "json"
-    });
-
-    try {
-        const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Ploob" }
-        });
-
-        if (!res.ok) throw new Error("All images fetch failed");
-        
-        const json = await res.json();
-        const allimages = json.query?.allimages || [];
-
-        if (allimages.length === 0) return "No images found on the wiki.";
-
-        // Return a comma-separated list of filenames
-        return allimages.map(img => img.name).join(", ");
-
-    } catch (err) {
-        console.error("getAllImages error:", err);
-        return "Error fetching wiki image list.";
-    }
-}
-
 async function loadPages() {
     try {
         console.log("Loading all wiki pages...");
@@ -500,7 +433,5 @@ module.exports = {
     getLeadSection, 
     parseWikiLinks, 
     parseTemplates,
-    performSearch,
-    getImagesOnPage,
-    getAllImages
+    performSearch
 };
