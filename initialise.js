@@ -643,23 +643,34 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             // If Gemini returned tagged chunks, send them individually with delay
             if (botUsedTags) {
         
-                const channel = messageOrInteraction.channel; // Use channel from interaction/message
+                const channel = messageOrInteraction.channel; 
                 const replyOptions = { allowedMentions: { repliedUser: false } };
                 
                 (async () => {
-                    // 1. Send the first chunk using the original reply/edit method
+                    // 1. Send the first chunk 
                     const firstChunk = botTaggedChunks.shift();
                     if (firstChunk) {
-                        if (isInteraction(messageOrInteraction)) {
+                        try {
+                            // Try to reply/edit first
+                            if (isInteraction(messageOrInteraction)) {
                                 await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
                             } else {
-                                // Message-based reply (Safe Check)
-                                if (typeof messageOrInteraction.reply === 'function') {
-                                    await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
-                                } else {
-                                    await messageOrInteraction.channel.send({ ...replyOptions, content: firstChunk });
-                                }
+                                // Message-based reply
+                                await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
                             }
+                        } catch (err) {
+                            // --- FIX START ---
+                            // If the user deleted the message, .reply() fails with 50035 or 10008.
+                            // We catch this and fallback to a standard channel.send()
+                            const isMissingMsg = err.code === 10008 || (err.code === 50035 && String(err.message).includes("Unknown message"));
+
+                            if (isMissingMsg && channel) {
+                                await channel.send({ ...replyOptions, content: firstChunk });
+                            } else {
+                                console.error("Error sending first chunk:", err); // Log real errors
+                            }
+                            // --- FIX END ---
+                        }
                     }
         
                     // 2. Send the rest as follow-ups/channel sends with a delay
@@ -667,7 +678,6 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                         const delay = 1000 + Math.floor(Math.random() * 2000);
                         await new Promise(r => setTimeout(r, delay));
                 
-                        // For subsequent chunks, use channel.send (as requested)
                         if (channel && typeof channel.send === "function") {
                              await channel.send({ ...replyOptions, content: chunk });
                         }
@@ -676,6 +686,8 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         
                 return; // Stop the normal output path
             }
+
+            // ... (Rest of your splitMessage logic for non-tagged messages) ...
 
             // Split the reply text if it exceeds the limit (Discord max is 2000)
             const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
@@ -689,15 +701,18 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     }
                 };
 
-                // For the first message, we use the original reply mechanism (editReply/reply)
+                // For the first message, we use the original reply mechanism
                 if (index === 0) {
-                    if (isInteraction(messageOrInteraction)) {
-                        await messageOrInteraction.editReply(fallbackOptions);
-                    } else {
-                        // Safe fallback for mock messages
-                        if (typeof messageOrInteraction.reply === 'function') {
-                            await messageOrInteraction.reply(fallbackOptions);
+                    try {
+                        if (isInteraction(messageOrInteraction)) {
+                            await messageOrInteraction.editReply(fallbackOptions);
                         } else {
+                            await messageOrInteraction.reply(fallbackOptions);
+                        }
+                    } catch (err) {
+                        // Fallback if message deleted
+                        const isMissingMsg = err.code === 10008 || (err.code === 50035 && String(err.message).includes("Unknown message"));
+                        if (isMissingMsg && messageOrInteraction.channel) {
                             await messageOrInteraction.channel.send(fallbackOptions);
                         }
                     }
@@ -735,25 +750,45 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         }
 
     } catch (err) {
+        // --- 1. IGNORE DELETED MESSAGE ERRORS ---
+        // Code 10008: Unknown Message 
+        // Code 50035: Invalid Form Body (specifically "Unknown message" regarding the reference)
+        const isUnknownMessage = 
+            err.code === 10008 || 
+            (err.code === 50035 && String(err.message).includes("Unknown message"));
+
+        if (isUnknownMessage) {
+            // The user deleted the message before we could reply. 
+            // Stop everything silently. Do NOT try to reply again.
+            return;
+        }
+
         console.error("Error handling request:", err);
-        const errorOptions = {
-            content: MESSAGES.processingError,
-            allowedMentions: {
-                repliedUser: false
+
+        // --- 2. SAFE ERROR REPORTING ---
+        // If it's a different error, try to tell the user, but don't crash if that fails too.
+        try {
+            const errorOptions = {
+                content: MESSAGES.processingError,
+                allowedMentions: { repliedUser: false }
+            };
+
+            if (isInteraction(messageOrInteraction)) {
+                if (!messageOrInteraction.replied && !messageOrInteraction.deferred) {
+                    await messageOrInteraction.reply({ ...errorOptions, ephemeral: true });
+                } else {
+                    await messageOrInteraction.followUp({ ...errorOptions, ephemeral: true });
+                }
+            } else {
+                // For normal messages, check if we can send to the channel 
+                // instead of replying to avoid the "Unknown Message" error again
+                if (messageOrInteraction.channel) {
+                    await messageOrInteraction.channel.send(errorOptions);
+                }
             }
-        };
-        if (isInteraction(messageOrInteraction)) {
-            // Use followUp if it hasn't been replied to yet, or editReply otherwise (best-effort)
-            try {
-                await messageOrInteraction.editReply(errorOptions);
-            } catch (e) {
-                await messageOrInteraction.followUp({
-                    ...errorOptions,
-                    ephemeral: true
-                });
-            }
-        } else {
-            await messageOrInteraction.reply(errorOptions);
+        } catch (finalErr) {
+            // If even sending the error message fails, just swallow the error to prevent a crash.
+            // console.warn("Failed to send error response:", finalErr.message);
         }
     } finally {
         if (typingInterval) clearInterval(typingInterval);
