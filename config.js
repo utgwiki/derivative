@@ -122,6 +122,8 @@ Do not output anything else if you choose to terminate.
     System: Content: The Tower Map is 500 studs high...
     You: The Tower map is 500 studs high!
 
+Before doing any action, make sure to always use MW_SEARCH first. This helps you gain an understanding in the context of ${GAME_TOPIC} and prevents you from hallucinating.
+
 You have the ability to send image URLs:
     For search for images on the wiki:
         1. Generate exactly [MW_SEARCH: File:<query>] (e.g [MW_SEARCH: File:Example])

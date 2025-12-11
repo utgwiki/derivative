@@ -20,7 +20,6 @@ const {
 } = require("./functions/parse_page.js");
 const { 
     askGemini, 
-    askGeminiForPages, 
     MESSAGES 
 } = require("./functions/conversation.js");
 
@@ -483,17 +482,6 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 pageTitles = [explicitTemplateFoundTitle];
             }
         } else {
-            // Normal operation (non-template mode)
-            // Use rawUserMsg for page search to avoid noise from context
-            pageTitles = await askGeminiForPages(rawUserMsg); 
-            if (pageTitles.length) {
-                for (const pageTitle of pageTitles) {
-                    if (knownPages.includes(pageTitle)) { 
-                        const content = await getWikiContent(pageTitle);
-                        if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
-                    }
-                }
-            }
         }
 
         let reply = "";

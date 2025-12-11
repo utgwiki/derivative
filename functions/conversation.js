@@ -305,4 +305,4 @@ function getHistory(channelId) {
     return chatHistories.get(channelId) || [];
 }
 
-module.exports = { askGemini, askGeminiForPages, MESSAGES, getHistory };
+module.exports = { askGemini, MESSAGES, getHistory };
