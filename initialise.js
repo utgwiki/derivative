@@ -735,25 +735,45 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         }
 
     } catch (err) {
+        // --- 1. IGNORE DELETED MESSAGE ERRORS ---
+        // Code 10008: Unknown Message 
+        // Code 50035: Invalid Form Body (specifically "Unknown message" regarding the reference)
+        const isUnknownMessage = 
+            err.code === 10008 || 
+            (err.code === 50035 && String(err.message).includes("Unknown message"));
+
+        if (isUnknownMessage) {
+            // The user deleted the message before we could reply. 
+            // Stop everything silently. Do NOT try to reply again.
+            return;
+        }
+
         console.error("Error handling request:", err);
-        const errorOptions = {
-            content: MESSAGES.processingError,
-            allowedMentions: {
-                repliedUser: false
+
+        // --- 2. SAFE ERROR REPORTING ---
+        // If it's a different error, try to tell the user, but don't crash if that fails too.
+        try {
+            const errorOptions = {
+                content: MESSAGES.processingError,
+                allowedMentions: { repliedUser: false }
+            };
+
+            if (isInteraction(messageOrInteraction)) {
+                if (!messageOrInteraction.replied && !messageOrInteraction.deferred) {
+                    await messageOrInteraction.reply({ ...errorOptions, ephemeral: true });
+                } else {
+                    await messageOrInteraction.followUp({ ...errorOptions, ephemeral: true });
+                }
+            } else {
+                // For normal messages, check if we can send to the channel 
+                // instead of replying to avoid the "Unknown Message" error again
+                if (messageOrInteraction.channel) {
+                    await messageOrInteraction.channel.send(errorOptions);
+                }
             }
-        };
-        if (isInteraction(messageOrInteraction)) {
-            // Use followUp if it hasn't been replied to yet, or editReply otherwise (best-effort)
-            try {
-                await messageOrInteraction.editReply(errorOptions);
-            } catch (e) {
-                await messageOrInteraction.followUp({
-                    ...errorOptions,
-                    ephemeral: true
-                });
-            }
-        } else {
-            await messageOrInteraction.reply(errorOptions);
+        } catch (finalErr) {
+            // If even sending the error message fails, just swallow the error to prevent a crash.
+            // console.warn("Failed to send error response:", finalErr.message);
         }
     } finally {
         if (typingInterval) clearInterval(typingInterval);
