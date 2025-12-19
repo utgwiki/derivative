@@ -226,8 +226,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         text = result.text(); 
                     } else if (result.response && typeof result.response.text === 'function') {
                         text = result.response.text();
-                    } else if (result.candidates && result.candidates[0] && result.candidates[0].content) {
-                        // Raw candidate access
+                    } else if (result.candidates?.[0]?.content?.parts) {
+                        // Raw candidate access - NOW SAFE with optional chaining
                          text = result.candidates[0].content.parts.map(p => p.text).join("");
                     } else if (typeof result.text === 'string') {
                          text = result.text;
