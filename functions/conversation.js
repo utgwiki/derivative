@@ -226,8 +226,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         text = result.text(); 
                     } else if (result.response && typeof result.response.text === 'function') {
                         text = result.response.text();
-                    } else if (result.candidates && result.candidates[0] && result.candidates[0].content) {
-                        // Raw candidate access
+                    } else if (result.candidates?.[0]?.content?.parts) {
+                        // Raw candidate access - NOW SAFE with optional chaining
                          text = result.candidates[0].content.parts.map(p => p.text).join("");
                     } else if (typeof result.text === 'string') {
                          text = result.text;
@@ -268,7 +268,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const content = await getWikiContent(canonical);
                     
                     const resultText = content 
-                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 2500)}` // Limit length to avoid token overflow
+                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` // Limit length to avoid token overflow
                         : `[SYSTEM] Page "${requestedTitle}" not found or empty. Try a different search.`;
 
                     // Feed content back to Gemini

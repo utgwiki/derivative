@@ -199,7 +199,11 @@ async function getWikiContent(pageTitle) {
 
         if (json?.parse?.text?.["*"]) {
             const html = json.parse.text["*"];
-            return html.replace(/<[^>]*>?/gm, ""); // Strip HTML
+
+            const noStyle = html.replace(/<style[\s\S]*?<\/style>/gi, "");
+            const stripped = noStyle.replace(/<[^>]*>/g, "");
+
+            return stripped;
         }
         return null;
     } catch (err) {
