@@ -323,6 +323,22 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
     const isInteraction = interaction =>
         interaction.editReply || interaction.followUp;
 
+    // Helper to send messages safely (Handles Messages, Interactions, and Mock Objects)
+    const smartReply = async (payload) => {
+        if (isInteraction(messageOrInteraction)) {
+            if (messageOrInteraction.deferred || messageOrInteraction.replied) {
+                return messageOrInteraction.followUp(payload);
+            }
+            return messageOrInteraction.reply(payload);
+        } else if (typeof messageOrInteraction.reply === 'function') {
+            // Real Discord Message
+            return messageOrInteraction.reply(payload);
+        } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
+            // Mock Message or Fallback -> Send to channel
+            return messageOrInteraction.channel.send(payload);
+        }
+    };
+    
     // 💡 FIX START: Safely determine the Discord Message object 💡
     let message = null;
     if (messageOrInteraction.attachments) {
@@ -339,7 +355,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
     // The message passed to askGemini should be the original Message or Interaction for history/reply context
     const contextMessage = messageOrInteraction;
 
-    // 2. Start Typing Indicator
+    // Start typing indicator
     let typingInterval;
     if (contextMessage.channel?.sendTyping) {
         messageOrInteraction.channel.sendTyping().catch(() => {});
@@ -347,98 +363,53 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
     }
 
     try {
-        // --- 💡 NEW: Image Handling ---
+        // --- Image/Video Handling ---
         let imageURLs = [];
-
-        // 1. Check for attachments (only if we have a valid Message object)
-        if (message && message.attachments.size > 0) { // <-- SAFE CHECK
+        if (message && message.attachments.size > 0) {
             message.attachments.forEach(attachment => {
-                if (attachment.contentType && attachment.contentType.startsWith('image/')) {
+                // Accept images AND video (generic check, we refine in image_handling)
+                if (attachment.contentType && (attachment.contentType.startsWith('image/') || attachment.contentType.startsWith('video/'))) {
                     imageURLs.push(attachment.url);
                 }
             });
         }
 
         // 2. Check for image links in the message content (which uses userMsg)
-        const urlRegex = /(https?:\/\/[^\s]+?\.(jpe?g|png|gif|webp))/gi;
+        // Check for links in message
+        const urlRegex = /(https?:\/\/[^\s]+)/gi;
         const matches = [...rawUserMsg.matchAll(urlRegex)];
         matches.forEach(match => imageURLs.push(match[0]));
 
-        const uniqueImageURLs = [...new Set(imageURLs)].slice(0, 5); // Max 5 images
+        const uniqueImageURLs = [...new Set(imageURLs)].slice(0, 5); 
         let imageParts = [];
 
         if (uniqueImageURLs.length > 0) {
-            // CALLING FUNCTION FROM image_handling.js
             const partPromises = uniqueImageURLs.map(url => urlToGenerativePart(url));
             const parts = await Promise.all(partPromises);
             imageParts = parts.filter(part => part !== null);
         }
 
-        // C. Update userMsg if images are present (as discussed in the previous answer)
         if (imageParts.length > 0) {
-            if (!promptMsg.trim()) {
-                promptMsg = `What is in this image, and how does it relate to the wiki on ${WIKI_ENDPOINTS.BASE}?`;
+             if (!promptMsg.trim()) {
+                promptMsg = `Analyze the attached media in the context of the wiki ${WIKI_ENDPOINTS.BASE}`;
             } else {
-                promptMsg = `Analyze the attached image(s) in the context of the following request: ${promptMsg}`;
+                promptMsg = `Analyze the attached media in the context of: ${promptMsg}`;
             }
         }
 
-        // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
-        const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
-        const linkMatches = [...rawUserMsg.matchAll(wikiLinkRegex)];
-        if (linkMatches.length) {
-            const resolved = [];
-            for (const m of linkMatches) {
-                const raw = m[1].trim();
-                const canonical = await findCanonicalTitle(raw);
-        
-                if (!canonical) {
-                    // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
-                    const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
-                    if (isInteraction(messageOrInteraction)) {
-                        try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-                    } else {
-                        await messageOrInteraction.reply(replyOptions);
-                    }
-                    if (typingInterval) clearInterval(typingInterval);
-                    return;
-                }
-        
-                resolved.push(canonical);
-            }
-            
-            // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
-            const uniqueResolved = [...new Set(resolved)];
-            
-            const buildWikiUrl = (foundTitle) => {
-                const [pageOnly, frag] = String(foundTitle).split("#");
-                const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
-                return `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
-            };
-            
-            const urls = uniqueResolved.map(buildWikiUrl);
-        
-            const replyOptions = { content: urls.join("\n"), allowedMentions: { repliedUser: false } };
-            if (isInteraction(messageOrInteraction)) {
-                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-            } else {
-                await messageOrInteraction.reply(replyOptions);
-            }
-            if (typingInterval) clearInterval(typingInterval);
-            return;
-        }
-        
+        // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection === 
         // Detect explicit {{Template}} usage and resolve to canonical page title if present
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
-        const templateMatch = rawUserMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}/);
+        const templateMatch = rawUserMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}|\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/);
 
         let shouldUseComponentsV2 = false;
         let skipGemini = false;
         
         if (templateMatch) {
-            let rawTemplate = templateMatch[1].trim();
+            // Pick whichever group matched
+            let rawTemplate = (templateMatch[1] || templateMatch[2]).trim();
             let sectionName = null;
         
             if (rawTemplate.includes("#")) {
@@ -450,9 +421,9 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             const canonical = await findCanonicalTitle(rawTemplate);
             
             if (canonical) {
-                // ✅ Page FOUND: We assume user wants the content.
+                // ✅ Page FOUND: Enable V2, Skip AI
                 shouldUseComponentsV2 = true;
-                skipGemini = true; // Skip AI
+                skipGemini = true; 
                 explicitTemplateFoundTitle = canonical;
 
                 if (sectionName) {
@@ -467,24 +438,17 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 }
                 explicitTemplateName = rawTemplate;
             } else {
-                // The user might be asking "How do I use {{Template}}?"
-                // DO NOT trigger skipGemini. Let the AI handle it.
-                // We do nothing here, letting code proceed to askGemini.
-                console.log(`Template pattern found "${rawTemplate}" but no page exists. Falling back to Gemini.`);
+                console.log(`Pattern found "${rawTemplate}" but no page exists. Falling back to Gemini.`);
             }
         }
 
-        // ---- page ----
+        // ---- Page Context Fetching (if not skipping) ----
         let pageTitles = [];
         let wikiContent = "";
         
         if (skipGemini) {
-            if (explicitTemplateFoundTitle) {
-                pageTitles = [explicitTemplateFoundTitle];
-            }
+            if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
         } else {
-            // Normal operation (non-template mode)
-            // Use rawUserMsg for page search to avoid noise from context
             pageTitles = await askGeminiForPages(rawUserMsg); 
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
@@ -495,7 +459,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 }
             }
         }
-
+        
         let reply = "";
         
         if (!skipGemini) {  
@@ -525,16 +489,37 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             }
         }
 
-        let parsedReply = await parseTemplates(reply);  
-        parsedReply = await parseWikiLinks(parsedReply);
+        // Handle [PAGE_EMBED: ...] and disable auto-parsing   
+        // We DO NOT call parseTemplates(reply) or parseWikiLinks(reply) anymore.
+        let parsedReply = reply; 
 
-        // If this is an ephemeral message (Ask Derivative), strip the tags and force standard splitting
+        // Check for Bot-requested Embed
+        const embedRegex = /\[PAGE_EMBED:\s*(.*?)\]/i;
+        const embedMatch = parsedReply.match(embedRegex);
+
+        if (embedMatch) {
+            const requestedPage = embedMatch[1].trim();
+            
+            // Try to find the page
+            const canonical = await findCanonicalTitle(requestedPage);
+            
+            if (canonical) {
+                // Page exists -> Trigger Components V2 Logic
+                shouldUseComponentsV2 = true;
+                explicitTemplateFoundTitle = canonical;
+                
+                // Add this page to pageTitles so the image fetcher below can find a thumbnail
+                pageTitles.unshift(canonical); 
+            }
+            
+            // Remove the tag from the text regardless of validity
+            parsedReply = parsedReply.replace(embedMatch[0], "").trim();
+        }
+
         if (isEphemeral) {
-            // Remove the [START_MESSAGE] and [END_MESSAGE] tags globally
             parsedReply = parsedReply.replace(/\[START_MESSAGE\]/g, "").replace(/\[END_MESSAGE\]/g, "\n\n").trim();
         }
 
-        // If NOT ephemeral, we check for tags to do the cool delayed sending
         let botTaggedChunks = [];
         let botUsedTags = false;
 
@@ -543,12 +528,14 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             botUsedTags = botTaggedChunks.length > 0;
         }
 
-        // 5. Prepare Media (Image)
+        // Prepare Image for V2 or Embeds
         let imageUrl = null;
-        if (pageTitles.length > 0) {
-            const page = encodeURIComponent(pageTitles[0]);
+        // Prioritize the explicit title if one exists
+        const imageSearchTitle = explicitTemplateFoundTitle || (pageTitles.length > 0 ? pageTitles[0] : null);
+        
+        if (imageSearchTitle) {
+            const page = encodeURIComponent(imageSearchTitle);
             try {
-                // Fetch thumbnail from MediaWiki API
                 const imageRes = await fetch(`${API}?action=query&titles=${page}&prop=pageimages&pithumbsize=512&format=json`);
                 const imageJson = await imageRes.json();
                 const pages = imageJson.query?.pages;
@@ -561,36 +548,28 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
 
         let sent = false;
         
-        // 7. -------------------- TRY: Components V2 (best-effort) --------------------
+        // -------------------- COMPONENTS V2 (Embeds) --------------------
         if (shouldUseComponentsV2) {
             try {
                 const container = new ContainerBuilder();
                 const mainSection = new SectionBuilder();
     
-                // Text content
                 mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(parsedReply)]);
-                console.log(`imageurl is ${imageUrl}`);
                 
-                // Thumbnail accessory
                 const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png"; 
                 const finalImageUrl = (typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
                 
                 try {
                     mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
-                } catch (err) {
-                    console.warn("V2 thumbnail accessory creation failed, skipping V2 thumbnail:", err);
-                }      
+                } catch (err) { }      
     
                 if (mainSection.components && mainSection.components.length > 0) {
-                    // Filter out any undefined components just in case
                     mainSection.components = mainSection.components.filter(c => c !== undefined);
-                
                     if (mainSection.components.length > 0) {
                         container.addSectionComponents(mainSection);
                     }
                 }
                 
-                // Only create button if explicitTemplateFoundTitle is defined
                 if (explicitTemplateFoundTitle) {
                     try {
                         const [pageOnly, frag] = String(explicitTemplateFoundTitle).split("#");
@@ -602,122 +581,57 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                             .setStyle(ButtonStyle.Link)
                             .setURL(pageUrl);
                 
-                        // Only add btn if it's not undefined
                         if (btn) row.addComponents(btn);
                         if (row.components.length > 0) container.addActionRowComponents(row);
-                    } catch (err) {
-                        console.warn("Failed to create template link button:", err);
-                    }
+                    } catch (err) {}
                 }
-                
-                // Action Row for Buttons
-                // if (buttons.length > 0) {
-                // const row = new ActionRowBuilder();
-                // row.addComponents(...buttons);
-                // container.addActionRowComponents(row);
-                // }
     
-                // Send V2 message if components were successfully built
                 if (container.components && container.components.length > 0) {
                     const replyOptions = {
                         components: [container],
                         flags: MessageFlags.IsComponentsV2,
-                        allowedMentions: {
-                            repliedUser: false
-                        },
+                        allowedMentions: { repliedUser: false },
                     };
-    
-                    if (isInteraction(messageOrInteraction)) {
-                        await messageOrInteraction.editReply(replyOptions);
-                    } else {
-                        await messageOrInteraction.reply(replyOptions);
-                    }
+                    await smartReply(replyOptions);
                     sent = true;
                 }
             } catch (v2err) {
-                console.warn("Components V2 attempt failed — falling back to plain text only.", v2err);
+                console.warn("Components V2 attempt failed — falling back to plain text.", v2err);
             }
         }
         
         if (!sent && !shouldUseComponentsV2) {
-            // If Gemini returned tagged chunks, send them individually with delay
             if (botUsedTags) {
-        
-                const channel = messageOrInteraction.channel; 
                 const replyOptions = { allowedMentions: { repliedUser: false } };
-                
                 (async () => {
-                    // 1. Send the first chunk 
                     const firstChunk = botTaggedChunks.shift();
                     if (firstChunk) {
                         try {
-                            // Try to reply/edit first
-                            if (isInteraction(messageOrInteraction)) {
-                                await messageOrInteraction.editReply({ ...replyOptions, content: firstChunk });
-                            } else {
-                                // Message-based reply
-                                await messageOrInteraction.reply({ ...replyOptions, content: firstChunk });
-                            }
+                            // 1. Fix: Use smartReply for the first chunk
+                            await smartReply({ ...replyOptions, content: firstChunk });
                         } catch (err) {
-                            // --- FIX START ---
-                            // If the user deleted the message, .reply() fails with 50035 or 10008.
-                            // We catch this and fallback to a standard channel.send()
-                            const isMissingMsg = err.code === 10008 || (err.code === 50035 && String(err.message).includes("Unknown message"));
-
-                            if (isMissingMsg && channel) {
-                                await channel.send({ ...replyOptions, content: firstChunk });
-                            } else {
-                                console.error("Error sending first chunk:", err); // Log real errors
-                            }
-                            // --- FIX END ---
+                            console.error("Error sending first chunk:", err);
                         }
                     }
-        
-                    // 2. Send the rest as follow-ups/channel sends with a delay
+                    // 2. Send the rest
                     for (const chunk of botTaggedChunks) {
                         const delay = 1000 + Math.floor(Math.random() * 2000);
                         await new Promise(r => setTimeout(r, delay));
-                
-                        if (channel && typeof channel.send === "function") {
-                             await channel.send({ ...replyOptions, content: chunk });
+                        // Always use channel.send for followups to avoid edit collisions
+                        if (messageOrInteraction.channel) {
+                             await messageOrInteraction.channel.send({ ...replyOptions, content: chunk });
                         }
                     }
                 })();
-        
-                return; // Stop the normal output path
+                return; 
             }
 
-            // ... (Rest of your splitMessage logic for non-tagged messages) ...
-
-            // Split the reply text if it exceeds the limit (Discord max is 2000)
             const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
-
-            // Send each part sequentially
             for (const [index, part] of replyParts.entries()) {
-                const fallbackOptions = {
-                    content: part,
-                    allowedMentions: {
-                        repliedUser: false
-                    }
-                };
-
-                // For the first message, we use the original reply mechanism
+                const fallbackOptions = { content: part, allowedMentions: { repliedUser: false } };
                 if (index === 0) {
-                    try {
-                        if (isInteraction(messageOrInteraction)) {
-                            await messageOrInteraction.editReply(fallbackOptions);
-                        } else {
-                            await messageOrInteraction.reply(fallbackOptions);
-                        }
-                    } catch (err) {
-                        // Fallback if message deleted
-                        const isMissingMsg = err.code === 10008 || (err.code === 50035 && String(err.message).includes("Unknown message"));
-                        if (isMissingMsg && messageOrInteraction.channel) {
-                            await messageOrInteraction.channel.send(fallbackOptions);
-                        }
-                    }
+                    await smartReply(fallbackOptions);
                 } else {
-                    // For subsequent messages, we use a plain channel/interaction follow-up
                     if (isInteraction(messageOrInteraction)) {
                         await messageOrInteraction.followUp(fallbackOptions);
                     } else {
@@ -725,71 +639,23 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     }
                 }
             }
-            sent = true; // Mark as sent
-        }
-
-        // 8b. -------------------- TEMPLATE FALLBACK: plain text if V2 failed --------------------
-        if (!sent && shouldUseComponentsV2) {
-            const replyOptions = {
-                content: explicitTemplateContent || "I don't know.",
-                allowedMentions: { repliedUser: false }
-            };
-        
-            if (isInteraction(messageOrInteraction)) {
-                try {
-                    await messageOrInteraction.editReply(replyOptions);
-                } catch {
-                    await messageOrInteraction.followUp(replyOptions);
-                }
-            } else {
-                await messageOrInteraction.reply(replyOptions);
-            }
-        
             sent = true;
-            return;
+        }
+        
+        // V2 Fallback
+        if (!sent && shouldUseComponentsV2) {
+            await smartReply({ content: explicitTemplateContent || parsedReply, allowedMentions: { repliedUser: false } });
+            sent = true;
         }
 
     } catch (err) {
-        // --- 1. IGNORE DELETED MESSAGE ERRORS ---
-        // Code 10008: Unknown Message 
-        // Code 50035: Invalid Form Body (specifically "Unknown message" regarding the reference)
-        const isUnknownMessage = 
-            err.code === 10008 || 
-            (err.code === 50035 && String(err.message).includes("Unknown message"));
-
-        if (isUnknownMessage) {
-            // The user deleted the message before we could reply. 
-            // Stop everything silently. Do NOT try to reply again.
-            return;
-        }
-
+        const isUnknownMessage = err.code === 10008 || (err.code === 50035 && String(err.message).includes("Unknown message"));
+        if (isUnknownMessage) return;
         console.error("Error handling request:", err);
-
-        // --- 2. SAFE ERROR REPORTING ---
-        // If it's a different error, try to tell the user, but don't crash if that fails too.
         try {
-            const errorOptions = {
-                content: MESSAGES.processingError,
-                allowedMentions: { repliedUser: false }
-            };
-
-            if (isInteraction(messageOrInteraction)) {
-                if (!messageOrInteraction.replied && !messageOrInteraction.deferred) {
-                    await messageOrInteraction.reply({ ...errorOptions, ephemeral: true });
-                } else {
-                    await messageOrInteraction.followUp({ ...errorOptions, ephemeral: true });
-                }
-            } else {
-                // For normal messages, check if we can send to the channel 
-                // instead of replying to avoid the "Unknown Message" error again
-                if (messageOrInteraction.channel) {
-                    await messageOrInteraction.channel.send(errorOptions);
-                }
-            }
-        } catch (finalErr) {
-            // If even sending the error message fails, just swallow the error to prevent a crash.
-            // console.warn("Failed to send error response:", finalErr.message);
-        }
+            // Use smartReply for error
+            await smartReply({ content: MESSAGES.processingError, ephemeral: true });
+        } catch (finalErr) {}
     } finally {
         if (typingInterval) clearInterval(typingInterval);
     }
