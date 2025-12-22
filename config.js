@@ -26,7 +26,7 @@ const BOT_SETTINGS = {
     MAX_FOLLOWUP_DELAY: 60 * 60 * 1000,
 };
 
-const GEMINI_MODEL = "gemini-3-flash-preview"; 
+const GEMINI_MODEL = "gemini-2.5-flash"; 
 
 // --- DISCORD STATUSES ---
 // Note: ActivityType is imported in initialise.js, so we keep these simple here
