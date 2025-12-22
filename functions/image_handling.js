@@ -7,7 +7,7 @@ async function urlToGenerativePart(url) {
         if (youtubeRegex.test(url)) {
              return {
                 fileData: {
-                    mimeType: "video/mp4",
+                    mimeType: "video/*",
                     fileUri: url, 
                 },
             };
