@@ -522,17 +522,14 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
 
             for (const title of secondaryEmbedTitles) {
                 try {
-                    // 1. Fetch content (Lead section or Extract)
-                    let wikiAbstract = await getLeadSection(title);
-                    if (!wikiAbstract) {
-                        const extractRes = await fetch(
-                            `${WIKI_ENDPOINTS.API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(title)}&format=json`
-                        );
-                        const extractJson = await extractRes.json();
-                        const pageObj = Object.values(extractJson.query.pages)[0];
-                        wikiAbstract = pageObj.extract || "No content available.";
-                    }
-
+                    // 1. Fetch content (Lead section or Extract)                    
+                    const extractRes = await fetch(
+                       `${WIKI_ENDPOINTS.API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(title)}&format=json`
+                    );
+                    const extractJson = await extractRes.json();
+                    const pageObj = Object.values(extractJson.query.pages)[0];
+                    let wikiAbstract = pageObj.extract || "No content available.";
+                    
                     if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
 
                     // 2. Fetch Image
