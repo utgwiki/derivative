@@ -644,7 +644,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             try {
                 // 1. Fetch the content for the card (Abstract/Lead Section)
                 // We use the same logic as the {{...}} handler or getLeadSection
-                let wikiAbstract = await getLeadSection(secondaryEmbedTitle);
+                let wikiAbstract = parsedReply;
                 
                 // Fallback if lead section fails
                 if (!wikiAbstract) {
@@ -673,7 +673,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 const mainSection = new SectionBuilder();
 
                 // Add the Wiki Abstract text
-                mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(`**${secondaryEmbedTitle}**\n${wikiAbstract}`)]);
+                mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(`${wikiAbstract}`)]);
 
                 // Add Image
                 try {
@@ -691,7 +691,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 
                 const row = new ActionRowBuilder();
                 const btn = new ButtonBuilder()
-                    .setLabel("Read Article")
+                    .setLabel(secondaryEmbedTitle)
                     .setStyle(ButtonStyle.Link)
                     .setURL(pageUrl);
                 
