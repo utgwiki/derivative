@@ -496,6 +496,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         // Check for Bot-requested Embed
         const embedRegex = /\[PAGE_EMBED:\s*(.*?)\]/i;
         const embedMatch = parsedReply.match(embedRegex);
+        let secondaryEmbedTitle = null; // Store the title for later
 
         if (embedMatch) {
             const requestedPage = embedMatch[1].trim();
@@ -504,15 +505,11 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             const canonical = await findCanonicalTitle(requestedPage);
             
             if (canonical) {
-                // Page exists -> Trigger Components V2 Logic
-                shouldUseComponentsV2 = true;
-                explicitTemplateFoundTitle = canonical;
-                
-                // Add this page to pageTitles so the image fetcher below can find a thumbnail
-                pageTitles.unshift(canonical); 
+                // Store for a SECOND message, do not trigger V2 for the main message
+                secondaryEmbedTitle = canonical;
             }
             
-            // Remove the tag from the text regardless of validity
+            // Remove the tag from the text regardless of validity so the user doesn't see it
             parsedReply = parsedReply.replace(embedMatch[0], "").trim();
         }
 
@@ -640,6 +637,85 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 }
             }
             sent = true;
+        }
+
+        // Secondary embed triggered by AI
+        if (secondaryEmbedTitle) {
+            try {
+                // 1. Fetch the content for the card (Abstract/Lead Section)
+                // We use the same logic as the {{...}} handler or getLeadSection
+                let wikiAbstract = await getLeadSection(secondaryEmbedTitle);
+                
+                // Fallback if lead section fails
+                if (!wikiAbstract) {
+                     const extractRes = await fetch(
+                        `${WIKI_ENDPOINTS.API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(secondaryEmbedTitle)}&format=json`
+                    );
+                    const extractJson = await extractRes.json();
+                    const pageObj = Object.values(extractJson.query.pages)[0];
+                    wikiAbstract = pageObj.extract || "No content available.";
+                }
+
+                // Limit length for the card
+                if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
+
+                // 2. Fetch Image specifically for this card
+                let cardImageUrl = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png";
+                try {
+                    const imgRes = await fetch(`${WIKI_ENDPOINTS.API}?action=query&titles=${encodeURIComponent(secondaryEmbedTitle)}&prop=pageimages&pithumbsize=512&format=json`);
+                    const imgJson = await imgRes.json();
+                    const p = Object.values(imgJson.query?.pages || {})[0];
+                    if (p?.thumbnail?.source) cardImageUrl = p.thumbnail.source;
+                } catch(e) {}
+
+                // 3. Build the Components V2 Container
+                const container = new ContainerBuilder();
+                const mainSection = new SectionBuilder();
+
+                // Add the Wiki Abstract text
+                mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(`**${secondaryEmbedTitle}**\n${wikiAbstract}`)]);
+
+                // Add Image
+                try {
+                    mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(cardImageUrl));
+                } catch (err) {}
+
+                if (mainSection.components.length > 0) {
+                    container.addSectionComponents(mainSection);
+                }
+
+                // Add "Read More" Button
+                const [pageOnly, frag] = String(secondaryEmbedTitle).split("#");
+                const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
+                const pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+                
+                const row = new ActionRowBuilder();
+                const btn = new ButtonBuilder()
+                    .setLabel("Read Article")
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(pageUrl);
+                
+                row.addComponents(btn);
+                container.addActionRowComponents(row);
+
+                // 4. Send as a separate message
+                // We use messageOrInteraction.channel.send to ensure it's a new entry, 
+                // or followUp if it's an interaction context.
+                const embedPayload = {
+                    components: [container],
+                    flags: MessageFlags.IsComponentsV2,
+                    allowedMentions: { repliedUser: false }
+                };
+
+                if (isInteraction(messageOrInteraction)) {
+                    await messageOrInteraction.followUp(embedPayload);
+                } else if (messageOrInteraction.channel) {
+                    await messageOrInteraction.channel.send(embedPayload);
+                }
+
+            } catch (secErr) {
+                console.error("Failed to send secondary page embed:", secErr);
+            }
         }
         
         // V2 Fallback
@@ -858,7 +934,7 @@ client.on("interactionCreate", async (interaction) => {
         ephemeral: ephemeralSetting
     });
     
-    await handleUserRequest(userPrompt, userPrompt, interaction, ephemeralSetting);
+    await handleUserRequest(userPrompt, userPrompt, interaction, true);
 });
 
 client.login(DISCORD_TOKEN);
