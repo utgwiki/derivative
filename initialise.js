@@ -418,7 +418,11 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         }
 
         if (isEphemeral) {
-            parsedReply = parsedReply.replace(/\[START_MESSAGE\]/g, "").replace(/\[END_MESSAGE\]/g, "\n\n").trim();
+            parsedReply = parsedReply
+  .replace(/\[START_MESSAGE\]/g, "")
+  .replace(/\[END_MESSAGE\]/g, "\n")
+  .replace(/\[PAGE_EMBED:[^\]]*\]/g, "")
+  .trim();
         }
 
         let botTaggedChunks = [];
