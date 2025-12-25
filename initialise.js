@@ -234,6 +234,9 @@ client.once("ready", async () => {
     setInterval(() => { setRandomStatus(client); }, STATUS_INTERVAL_MS);
 
     try {
+        console.log("Clearing existing global commands...");
+        await client.application.commands.set([]); 
+        
         await client.application.commands.create(
             new ContextMenuCommandBuilder()
             .setName(`Ask ${BOT_NAME}...`)
