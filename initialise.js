@@ -70,22 +70,40 @@ function splitMessage(text, maxLength = DISCORD_MAX_LENGTH) {
     let currentText = text;
 
     while (currentText.length > 0) {
+        // If text fits, push and done
         if (currentText.length <= maxLength) {
             messages.push(currentText);
             break;
         }
-        let splitIndex = maxLength;
-        let lastSpace = currentText.lastIndexOf(' ', splitIndex);
-        if (lastSpace !== -1) splitIndex = lastSpace;
+
+        // 1. Determine safe split position
+        // We reserve a slight buffer (e.g., 10 chars) in case we need to add code block tags
+        const searchLength = maxLength - 10;
+        
+        let splitIndex = currentText.lastIndexOf('\n', searchLength);
+        if (splitIndex === -1) splitIndex = currentText.lastIndexOf(' ', searchLength);
+        if (splitIndex === -1) splitIndex = searchLength;
+
         let segment = currentText.slice(0, splitIndex).trim();
-        if (segment.length === 0) {
-            segment = currentText.slice(0, maxLength);
-            splitIndex = maxLength;
+        let remaining = currentText.slice(splitIndex).trim();
+
+        // 2. Check for unclosed code blocks (odd number of ```)
+        // matches '```' sequences
+        const backtickMatches = segment.match(/```/g);
+        const isInsideCodeBlock = backtickMatches && (backtickMatches.length % 2 !== 0);
+
+        if (isInsideCodeBlock) {
+            // Close the block in this segment
+            segment += "\n```";
+            // Re-open the block in the next segment
+            remaining = "```\n" + remaining;
         }
+
         messages.push(segment);
-        currentText = currentText.slice(splitIndex).trim();
+        currentText = remaining;
     }
-    return messages.filter(msg => msg.length <= DISCORD_MAX_LENGTH);
+
+    return messages;
 }
 
 function extractTaggedBotChunks(text) {
