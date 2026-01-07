@@ -504,17 +504,26 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             if (botUsedTags) {
                 const replyOptions = { allowedMentions: { repliedUser: false } };
                 (async () => {
-                    const firstChunk = botTaggedChunks.shift();
-                    if (firstChunk) await smartReply({ ...replyOptions, content: firstChunk });
-                    for (const chunk of botTaggedChunks) {
-                        const delay = 1000 + Math.floor(Math.random() * 2000);
-                        await new Promise(r => setTimeout(r, delay));
-                        if (messageOrInteraction.channel) {
-                             await messageOrInteraction.channel.send({ ...replyOptions, content: chunk });
+                    // FIX: Iterate through chunks and SPLIT specific chunks if they are too long
+                    while (botTaggedChunks.length > 0) {
+                        const rawChunk = botTaggedChunks.shift();
+                        // Apply splitMessage to the chunk in case the chunk itself is huge
+                        const splitParts = splitMessage(rawChunk);
+
+                        for (const part of splitParts) {
+                            if (!sent) {
+                                await smartReply({ ...replyOptions, content: part });
+                                sent = true; 
+                            } else {
+                                const delay = 1000 + Math.floor(Math.random() * 2000);
+                                await new Promise(r => setTimeout(r, delay));
+                                if (messageOrInteraction.channel) {
+                                     await messageOrInteraction.channel.send({ ...replyOptions, content: part });
+                                }
+                            }
                         }
                     }
                 })();
-                // Return here? No, we might still have secondary embeds to send after text.
             } else {
                 const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
                 for (const [index, part] of replyParts.entries()) {
@@ -535,9 +544,16 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         
         // V2 Fallback (Should rarely happen)
         if (!sent && shouldUseComponentsV2) {
-            await smartReply({ content: explicitTemplateContent || parsedReply, allowedMentions: { repliedUser: false } });
+            const rawFallback = explicitTemplateContent || parsedReply;
+            const fallbackParts = splitMessage(rawFallback, DISCORD_MAX_LENGTH);
+            
+            for (const [index, part] of fallbackParts.entries()) {
+                const opts = { content: part, allowedMentions: { repliedUser: false } };
+                if (index === 0) await smartReply(opts);
+                else if (messageOrInteraction.channel) await messageOrInteraction.channel.send(opts);
+            }
         }
-
+        
         // -------------------- SECONDARY EMBEDS (AI Triggered [PAGE_EMBED]) --------------------
         // We wait for the main text to finish sending/chunking before sending embeds?
         // Since the chunking is async/separate, we can just fire these off.
