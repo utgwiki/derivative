@@ -3,7 +3,6 @@ const { WIKI_ENDPOINTS } = require("../config.js");
 
 async function getContributionScores() {
     try {
-        // We use text={{...}} to trigger the special page parse
         const params = new URLSearchParams({
             action: "parse",
             format: "json",
@@ -13,51 +12,28 @@ async function getContributionScores() {
         });
 
         const url = `${WIKI_ENDPOINTS.API}?${params.toString()}`;
-        
-        const res = await fetch(url, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
-        });
-
-        if (!res.ok) throw new Error(`API Error: ${res.status}`);
-        
+        const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Deriv" } });
         const json = await res.json();
         const html = json.parse?.text?.["*"];
 
-        if (!html) return "Error: Could not retrieve contribution scores.";
+        if (!html) return "No contribution data available.";
 
-        // --- HTML PARSING ---
-        // 1. Split by table rows
+        // Basic Regex to pull the username and score from the HTML table
         const rows = html.split('<tr class="">');
-        rows.shift(); // Remove table header garbage
+        rows.shift(); // Remove header
 
-        let dataString = "--- DATA: TOP 10 WIKI CONTRIBUTORS ---\n";
-
-        rows.forEach((row, index) => {
-            const cleanRow = row.replace(/\n/g, "");
-            
-            // Extract Username
-            const userMatch = cleanRow.match(/class="mw-userlink"[^>]*><bdi>(.*?)<\/bdi>/);
-            const username = userMatch ? userMatch[1] : "Unknown";
-
-            // Extract Numbers (Rank, Score, Pages, Changes)
-            // The API returns cells like: <td>1</td> <td>6,005</td> ...
-            const statMatches = [...cleanRow.matchAll(/>([\d,]+)\s*<\/td>/g)];
-            
-            if (statMatches.length >= 4) {
-                const score = statMatches[1][1];   // Col 2
-                const pages = statMatches[2][1];   // Col 3
-                const changes = statMatches[3][1]; // Col 4
-                
-                // Format nicely for Gemini to read
-                dataString += `#${index + 1} ${username}: Score ${score} | Pages Created ${pages} | Edits ${changes}\n`;
+        let dataSummary = "TOP 10 CONTRIBUTORS DATA:\n";
+        rows.forEach((row, i) => {
+            const user = row.match(/<bdi>(.*?)<\/bdi>/)?.[1] || "Unknown";
+            const stats = [...row.matchAll(/>([\d,]+)\s*<\/td>/g)];
+            if (stats.length >= 4) {
+                dataSummary += `${i+1}. ${user}: Score ${stats[1][1]}, Edits ${stats[3][1]}\n`;
             }
         });
 
-        return dataString;
-
+        return dataSummary;
     } catch (err) {
-        console.error("Error fetching contrib scores:", err);
-        return "System Error: Unable to fetch contribution scores.";
+        return "Error fetching leaderboard.";
     }
 }
 
