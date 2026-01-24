@@ -7,6 +7,7 @@ loadMemory();
 
 // NEW IMPORTS FROM FUNCTIONS FOLDER
 const { urlToGenerativePart } = require("./functions/image_handling.js");
+const { getContributionScores } = require("./functions/contribscores.js");
 const { 
     loadPages, 
     findCanonicalTitle, 
@@ -391,6 +392,12 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                         if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
                     }
                 }
+            }
+
+            const leaderboardKeywords = ["top contributors", "leaderboard", "most edits", "contribution scores"];
+            if (leaderboardKeywords.some(key => rawUserMsg.toLowerCase().includes(key))) {
+                const scores = await getContributionScores();
+                wikiContent += `\n\n[SYSTEM DATA: CONTRIBUTION LEADERBOARD]\n${scores}`;
             }
         }
         
