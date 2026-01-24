@@ -6,7 +6,7 @@ async function getContributionScores() {
         const params = new URLSearchParams({
             action: "parse",
             format: "json",
-            text: "{{Special:ContributionScores/10/all}}", 
+            text: "{{Special:ContributionScores/10/7}}", 
             prop: "text",
             disablelimitreport: "true"
         });
