@@ -7,6 +7,7 @@ loadMemory();
 
 // NEW IMPORTS FROM FUNCTIONS FOLDER
 const { urlToGenerativePart } = require("./functions/image_handling.js");
+const { getContributionScores } = require("./functions/contribscores.js");
 const { 
     loadPages, 
     findCanonicalTitle, 
