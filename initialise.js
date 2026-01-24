@@ -393,6 +393,12 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     }
                 }
             }
+
+            const leaderboardKeywords = ["top contributors", "leaderboard", "most edits", "contribution scores"];
+            if (leaderboardKeywords.some(key => rawUserMsg.toLowerCase().includes(key))) {
+                const scores = await getContributionScores();
+                wikiContent += `\n\n[SYSTEM DATA: CONTRIBUTION LEADERBOARD]\n${scores}`;
+            }
         }
         
         let reply = "";
