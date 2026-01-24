@@ -394,7 +394,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 }
             }
 
-            const leaderboardKeywords = ["top contributors", "leaderboard", "most edits", "contribution scores"];
+            const leaderboardKeywords = ["top contributors", "leaderboard", "most edits", "contribution scores", "top 5", "top 10", "best editors", "top editors"];
             if (leaderboardKeywords.some(key => rawUserMsg.toLowerCase().includes(key))) {
                 const scores = await getContributionScores();
                 wikiContent += `\n\n[SYSTEM DATA: CONTRIBUTION LEADERBOARD]\n${scores}`;
