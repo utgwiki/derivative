@@ -278,7 +278,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
                         : `[SYSTEM] Page not found.`;
 
-                    currentMessageParts = [{ text: resultText }];
+                    currentMessageParts = [{
+                        role: "user",
+                        parts: [{ text: resultText }]
+                    }];
                     continue;
                 }
 
