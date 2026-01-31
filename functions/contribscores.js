@@ -1,6 +1,15 @@
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 const { WIKI_ENDPOINTS } = require("../config.js");
 
+const contributionScoresTool = {
+    name: "getContributionScores",
+    description: "Retrieves the current leaderboard of top 10 contributors to the wiki, including their scores and edit counts. Use this when the user asks for 'top editors', 'leaderboard', 'who edits the most', etc.",
+    parameters: {
+        type: "OBJECT",
+        properties: {}, // No parameters required
+    },
+};
+
 async function getContributionScores() {
     try {
         const params = new URLSearchParams({
@@ -16,7 +25,7 @@ async function getContributionScores() {
         const json = await res.json();
         const html = json.parse?.text?.["*"];
 
-        if (!html) return "No contribution data available.";
+        if (!html) return { result: "No contribution data available." };
 
         // Basic Regex to pull the username and score from the HTML table
         const rows = html.split('<tr class="">');
@@ -31,10 +40,11 @@ async function getContributionScores() {
             }
         });
 
-        return dataSummary;
+        return { result: dataSummary };
     } catch (err) {
-        return "Error fetching leaderboard.";
+        console.error("Error fetching leaderboard:", err);
+        return { error: "Failed to fetch leaderboard data." };
     }
 }
 
-module.exports = { getContributionScores };
+module.exports = { getContributionScores, contributionScoresTool };
