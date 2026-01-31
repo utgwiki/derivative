@@ -183,14 +183,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             const timeContext = `[Time: ${timeStr}]`;
             let currentMessageParts = [...imageParts, { text: `${timeContext} ${userInput}` }];
             
-let finalResponse = "";
+            let finalResponse = "";
             let iterations = 0;
             const MAX_ITERATIONS = 5; 
-
-            // Initial message from user
-            const timeContext = `[Time: ${timeStr}]`;
-            let currentMessageParts = [...imageParts, { text: `${timeContext} ${userInput}` }];
-
+            
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
 
