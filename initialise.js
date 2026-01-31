@@ -396,7 +396,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         }
 
         const tools = {
-            definitions: [contributionScoresTool],
+            functionDeclarations: [contributionScoresTool],
             functions: {
                 "getContributionScores": getContributionScores
             }
