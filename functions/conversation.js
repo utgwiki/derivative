@@ -202,27 +202,42 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const functionResponses = [];
                     
                     for (const call of functionCalls) {
-                        console.log(`[Tool] Gemini calling: ${call.name}`);
-                        if (tools?.functions?.[call.name]) {
+                        const fnName = call.name;
+                        const fnArgs = call.args;
+                        
+                        console.log(`[Tool] Gemini calling function: ${fnName}`);
+
+                        if (tools?.functions?.[fnName]) {
                             try {
-                                const fnResult = await tools.functions[call.name](call.args);
+                                const fnResult = await tools.functions[fnName](fnArgs);
+                                
+                                // 💡 This structure is what satisfies the "ContentUnion" requirement
                                 functionResponses.push({
-                                    functionResponse: { name: call.name, response: fnResult }
+                                    functionResponse: {
+                                        name: fnName,
+                                        response: fnResult 
+                                    }
                                 });
-                            } catch (err) {
+                            } catch (fnErr) {
+                                console.error(`Function ${fnName} failed:`, fnErr);
                                 functionResponses.push({
-                                    functionResponse: { name: call.name, response: { error: "Failed" } }
+                                    functionResponse: {
+                                        name: fnName,
+                                        response: { error: "Execution failed" }
+                                    }
                                 });
                             }
                         }
                     }
 
-                    // 💡 THE CONTENTUNION FIX:
-                    // Wrap the results in a 'function' role object.
+                    // 💡 THE CRITICAL FIX: 
+                    // Wrap the parts in a Content object with the 'function' role.
+                    // This is what prevents the ContentUnion error on the next sendMessage() call.
                     currentMessageParts = [{
                         role: "function",
                         parts: functionResponses
                     }];
+                    
                     continue; // Loop back to give Gemini the data
                 }
 
