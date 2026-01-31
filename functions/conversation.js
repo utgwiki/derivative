@@ -183,18 +183,23 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             const timeContext = `[Time: ${timeStr}]`;
             let currentMessageParts = [...imageParts, { text: `${timeContext} ${userInput}` }];
             
-            let finalResponse = "";
+let finalResponse = "";
             let iterations = 0;
             const MAX_ITERATIONS = 5; 
+
+            // Initial message from user
+            const timeContext = `[Time: ${timeStr}]`;
+            let currentMessageParts = [...imageParts, { text: `${timeContext} ${userInput}` }];
 
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
 
-                // 1. Send message and await the response object
+                // 1. Send message to Gemini
+                // The first iteration sends User parts, subsequent ones send Function parts
                 const result = await chat.sendMessage(currentMessageParts);
                 const response = await result.response;
                 
-                // 💡 Check for function calls in the response parts
+                // Check for native function calls
                 const parts = response.candidates?.[0]?.content?.parts || [];
                 const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
 
@@ -211,7 +216,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
                                 
-                                // 💡 Format each individual response part
                                 functionResponses.push({
                                     functionResponse: {
                                         name: fnName,
@@ -221,80 +225,65 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
                                 functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: { error: "Execution failed" }
-                                    }
+                                    functionResponse: { name: fnName, response: { error: "Execution failed" } }
                                 });
                             }
                         }
                     }
 
-                    // Wrap parts in a "function" role object to satisfy ContentUnion
+                    // 💡 THE FIX: This specific structure satisfies "ContentUnion"
+                    // We must tell the API that these parts belong to the "function" role
                     currentMessageParts = [{
                         role: "function",
                         parts: functionResponses
                     }];
                     
-                    continue; // Loop back to send results to Gemini
+                    continue; 
                 }
 
-                // 2. Extract final text result
+                // 2. EXTRACT TEXT safely
                 let text = "";
                 try {
-                    // Check if there are any parts with actual text before calling .text()
-                    const hasTextPart = response.candidates?.[0]?.content?.parts?.some(p => p.text);
-                    
-                    if (hasTextPart) {
+                    // Check if there's actually text before calling .text() to avoid errors
+                    const hasText = response.candidates?.[0]?.content?.parts?.some(p => p.text);
+                    if (hasText) {
                         text = response.text();
-                    } else {
-                        // No text found, likely just a tool call turn
-                        text = "";
                     }
                 } catch (e) {
-                    // Fallback: manually join parts if .text() fails but parts exist
-                    if (response.candidates?.[0]?.content?.parts) {
-                        text = response.candidates[0].content.parts
-                            .filter(p => p.text)
-                            .map(p => p.text)
-                            .join("");
-                    }
+                    // Fallback for mixed/empty turns
+                    text = response.candidates?.[0]?.content?.parts
+                        ?.filter(p => p.text)
+                        .map(p => p.text)
+                        .join("") || "";
                 }
+
+                text = text.trim();
                 
-                text = (text || "").trim();
-                
-                // 3. Check for [MW_SEARCH: ...] (Legacy/Text Tool)
+                // 3. Handle Legacy MW_SEARCH / MW_CONTENT tags
                 const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
                 if (searchMatch) {
                     const query = searchMatch[1].trim();
                     console.log(`[Tool] Searching for: ${query}`);
-                    
                     const searchResults = await performSearch(query);
-                    
-                    currentMessageParts = [{ 
-                        text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` 
-                    }];
+                    currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
                     continue; 
                 }
 
-                // 4. Check for [MW_CONTENT: ...] (Legacy/Text Tool)
                 const contentMatch = text.match(/\[MW_CONTENT:\s*(.*?)\]/i);
                 if (contentMatch) {
                     const requestedTitle = contentMatch[1].trim();
-                    console.log(`[Tool] Fetching content for: ${requestedTitle}`);
-
                     const canonical = await findCanonicalTitle(requestedTitle) || requestedTitle;
                     const content = await getWikiContent(canonical);
                     
                     const resultText = content 
                         ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
-                        : `[SYSTEM] Page "${requestedTitle}" not found or empty. Try a different search.`;
+                        : `[SYSTEM] Page not found.`;
 
                     currentMessageParts = [{ text: resultText }];
                     continue;
                 }
 
-                // 5. No tools used? This is the final answer.
+                // 4. Final Answer
                 finalResponse = text;
                 break;
             }
