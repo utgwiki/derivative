@@ -190,63 +190,53 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
 
-                // 1. Send message to Gemini
-                const result = await chat.sendMessage({
-                    message: currentMessageParts
-                });
+                // 1. Send message and await the full response
+                const result = await chat.sendMessage(currentMessageParts);
+                const response = await result.response;
                 
-                // CHECK FOR NATIVE FUNCTION CALLS FIRST
-                // The SDK exposes .functionCalls() on the result object if present
-                const calls = result.functionCalls ? result.functionCalls() : [];
-                
-                if (calls.length > 0) {
+                // 💡 FIX: Access function calls from the response parts
+                const parts = response.candidates?.[0]?.content?.parts || [];
+                const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
+
+                if (functionCalls.length > 0) {
                     const functionResponses = [];
                     
-                    for (const call of calls) {
+                    for (const call of functionCalls) {
                         const fnName = call.name;
                         const fnArgs = call.args;
                         
                         console.log(`[Tool] Gemini calling function: ${fnName}`);
 
-                        // Execute the function if implementation exists in 'tools.functions'
-                        if (tools && tools.functions && tools.functions[fnName]) {
+                        // Execute implementation from the tools object passed from initialise.js
+                        if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
                                 
-                                // Format response for Gemini
                                 functionResponses.push({
                                     functionResponse: {
                                         name: fnName,
-                                        response: fnResult // Expecting object like { result: ... }
+                                        response: fnResult 
                                     }
                                 });
                             } catch (fnErr) {
-                                console.error(`Function ${fnName} execution failed:`, fnErr);
+                                console.error(`Function ${fnName} failed:`, fnErr);
                                 functionResponses.push({
                                     functionResponse: {
                                         name: fnName,
-                                        response: { error: "Function execution failed." }
+                                        response: { error: "Execution failed" }
                                     }
                                 });
                             }
-                        } else {
-                            // Function requested but not found
-                            functionResponses.push({
-                                functionResponse: {
-                                    name: fnName,
-                                    response: { error: "Function not found on client." }
-                                }
-                            });
                         }
                     }
 
-                    // Feed function results back to Gemini in the next loop
+                    // Feed the function results back into the next iteration
                     currentMessageParts = functionResponses;
                     continue; 
                 }
 
-                // 2. EXTRACT TEXT (Safe extraction)
-                let text = "";
+                // 2. Extract the final text result
+                let text = response.text() || "";
                 try {
                     if (typeof result.text === 'function') {
                         text = result.text(); 
