@@ -162,8 +162,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             let geminiTools = [];
 
             // If custom tools (like leaderboard) are passed, add their definitions
-            if (tools && tools.definitions) {
-                geminiTools.push({ functionDeclarations: tools.definitions });
+            if (tools && tools.functionDeclarations) {
+                geminiTools.push({ functionDeclarations: tools.functionDeclarations });
             } else {
                 // Fallback to Google Search if no custom tools are provided
                 geminiTools = [ {googleSearch: {}}, {urlContrxt: {}} ];
