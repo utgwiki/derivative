@@ -190,11 +190,11 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
 
-                // 1. Send message and await the full response
+                // 1. Send message and await the response object
                 const result = await chat.sendMessage(currentMessageParts);
                 const response = await result.response;
                 
-                // 💡 FIX: Access function calls from the response parts
+                // 💡 Check for function calls in the response parts
                 const parts = response.candidates?.[0]?.content?.parts || [];
                 const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
 
@@ -207,11 +207,11 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         
                         console.log(`[Tool] Gemini calling function: ${fnName}`);
 
-                        // Execute implementation from the tools object passed from initialise.js
                         if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
                                 
+                                // 💡 Format each individual response part
                                 functionResponses.push({
                                     functionResponse: {
                                         name: fnName,
@@ -230,27 +230,37 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         }
                     }
 
-                    // Feed the function results back into the next iteration
-                    currentMessageParts = functionResponses;
-                    continue; 
+                    // Wrap parts in a "function" role object to satisfy ContentUnion
+                    currentMessageParts = [{
+                        role: "function",
+                        parts: functionResponses
+                    }];
+                    
+                    continue; // Loop back to send results to Gemini
                 }
 
-                // 2. Extract the final text result
-                let text = response.text() || "";
+                // 2. Extract final text result
+                let text = "";
                 try {
-                    if (typeof result.text === 'function') {
-                        text = result.text(); 
-                    } else if (result.response && typeof result.response.text === 'function') {
-                        text = result.response.text();
-                    } else if (result.candidates?.[0]?.content?.parts) {
-                         text = result.candidates[0].content.parts.map(p => p.text).join("");
-                    } else if (typeof result.text === 'string') {
-                         text = result.text;
+                    // Check if there are any parts with actual text before calling .text()
+                    const hasTextPart = response.candidates?.[0]?.content?.parts?.some(p => p.text);
+                    
+                    if (hasTextPart) {
+                        text = response.text();
+                    } else {
+                        // No text found, likely just a tool call turn
+                        text = "";
                     }
                 } catch (e) {
-                     // If purely a function call, text() might throw or be empty. That's fine.
+                    // Fallback: manually join parts if .text() fails but parts exist
+                    if (response.candidates?.[0]?.content?.parts) {
+                        text = response.candidates[0].content.parts
+                            .filter(p => p.text)
+                            .map(p => p.text)
+                            .join("");
+                    }
                 }
-
+                
                 text = (text || "").trim();
                 
                 // 3. Check for [MW_SEARCH: ...] (Legacy/Text Tool)
