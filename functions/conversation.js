@@ -165,8 +165,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             ];
 
             // If custom tools (like leaderboard) are passed, add their definitions
-            if (tools && tools.functionDeclarations) {
-                geminiTools.push({ functionDeclarations: tools.functionDeclarations });
+            if (tools && tools.definitions) {
+                geminiTools.push({ functionDeclarations: tools.definitions });
             }
 
             const chat = gemini.chats.create({
