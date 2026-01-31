@@ -191,8 +191,13 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                const result = await chat.sendMessage(currentMessageParts);
-                const response = await result.response;
+                const result = await chat.sendMessage(
+                    currentMessageParts[0]?.role
+                        ? currentMessageParts[0]
+                        : { role: "user", parts: currentMessageParts }
+                );
+                
+                const result = result.response;
                 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const parts = response.candidates?.[0]?.content?.parts || [];
@@ -256,7 +261,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const query = searchMatch[1].trim();
                     console.log(`[Tool] Searching for: ${query}`);
                     const searchResults = await performSearch(query);
-                    currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
+                    currentMessageParts = [{
+                        role: "user",
+                        parts: [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }]
+                    }];
                     continue; 
                 }
 
