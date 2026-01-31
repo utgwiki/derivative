@@ -191,11 +191,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                // The first iteration sends User parts, subsequent ones send Function parts
                 const result = await chat.sendMessage(currentMessageParts);
                 const response = await result.response;
                 
-                // Check for native function calls
+                // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const parts = response.candidates?.[0]?.content?.parts || [];
                 const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
 
@@ -203,57 +202,38 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const functionResponses = [];
                     
                     for (const call of functionCalls) {
-                        const fnName = call.name;
-                        const fnArgs = call.args;
-                        
-                        console.log(`[Tool] Gemini calling function: ${fnName}`);
-
-                        if (tools?.functions?.[fnName]) {
+                        console.log(`[Tool] Gemini calling: ${call.name}`);
+                        if (tools?.functions?.[call.name]) {
                             try {
-                                const fnResult = await tools.functions[fnName](fnArgs);
-                                
+                                const fnResult = await tools.functions[call.name](call.args);
                                 functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: fnResult 
-                                    }
+                                    functionResponse: { name: call.name, response: fnResult }
                                 });
-                            } catch (fnErr) {
-                                console.error(`Function ${fnName} failed:`, fnErr);
+                            } catch (err) {
                                 functionResponses.push({
-                                    functionResponse: { name: fnName, response: { error: "Execution failed" } }
+                                    functionResponse: { name: call.name, response: { error: "Failed" } }
                                 });
                             }
                         }
                     }
 
-                    // 💡 THE FIX: This specific structure satisfies "ContentUnion"
-                    // We must tell the API that these parts belong to the "function" role
+                    // 💡 THE CONTENTUNION FIX:
+                    // Wrap the results in a 'function' role object.
                     currentMessageParts = [{
                         role: "function",
                         parts: functionResponses
                     }];
-                    
-                    continue; 
+                    continue; // Loop back to give Gemini the data
                 }
 
                 // 2. EXTRACT TEXT safely
                 let text = "";
                 try {
-                    // Check if there's actually text before calling .text() to avoid errors
-                    const hasText = response.candidates?.[0]?.content?.parts?.some(p => p.text);
-                    if (hasText) {
-                        text = response.text();
-                    }
+                    text = response.text();
                 } catch (e) {
-                    // Fallback for mixed/empty turns
-                    text = response.candidates?.[0]?.content?.parts
-                        ?.filter(p => p.text)
-                        .map(p => p.text)
-                        .join("") || "";
+                    text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
-
-                text = text.trim();
+                text = (text || "").trim();
                 
                 // 3. Handle Legacy MW_SEARCH / MW_CONTENT tags
                 const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
@@ -268,6 +248,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 const contentMatch = text.match(/\[MW_CONTENT:\s*(.*?)\]/i);
                 if (contentMatch) {
                     const requestedTitle = contentMatch[1].trim();
+                    console.log(`[Tool] Fetching content for: ${requestedTitle}`);
                     const canonical = await findCanonicalTitle(requestedTitle) || requestedTitle;
                     const content = await getWikiContent(canonical);
                     
