@@ -166,7 +166,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 geminiTools.push({ functionDeclarations: tools.functionDeclarations });
             } else {
                 // Fallback to Google Search if no custom tools are provided
-                geminiTools = [ {googleSearch: {}}, {urlContrxt: {}} ];
+                geminiTools = [ {googleSearch: {}}, {urlContext: {}} ];
             }
 
             const chat = gemini.chats.create({
