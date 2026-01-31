@@ -159,14 +159,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         return await runWithMainKeys(async (gemini) => {
             
             // PREPARE TOOLS CONFIGURATION
-            const geminiTools = [
-                { googleSearch: {} },
-                { urlContext: {} }
-            ];
+            let geminiTools = [];
 
             // If custom tools (like leaderboard) are passed, add their definitions
             if (tools && tools.definitions) {
                 geminiTools.push({ functionDeclarations: tools.definitions });
+            } else {
+                // Fallback to Google Search if no custom tools are provided
+                geminiTools = [ {googleSearch: {}}, {urlContrxt: {}} ];
             }
 
             const chat = gemini.chats.create({
