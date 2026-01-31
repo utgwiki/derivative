@@ -7,7 +7,7 @@ loadMemory();
 
 // NEW IMPORTS FROM FUNCTIONS FOLDER
 const { urlToGenerativePart } = require("./functions/image_handling.js");
-const { getContributionScores } = require("./functions/contribscores.js");
+const { getContributionScores, contributionScoresTool } = require("./functions/contribscores.js");
 const { 
     loadPages, 
     findCanonicalTitle, 
@@ -393,13 +393,14 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     }
                 }
             }
-
-            const leaderboardKeywords = ["top contributors", "leaderboard", "most edits", "contribution scores", "top 5", "top 10", "best editors", "top editors"];
-            if (leaderboardKeywords.some(key => rawUserMsg.toLowerCase().includes(key))) {
-                const scores = await getContributionScores();
-                wikiContent += `\n\n[SYSTEM DATA: CONTRIBUTION LEADERBOARD]\n${scores}`;
-            }
         }
+
+        const tools = {
+            definitions: [contributionScoresTool],
+            functions: {
+                "getContributionScores": getContributionScores
+            }
+        };
         
         let reply = "";
         
@@ -409,7 +410,8 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 wikiContent || undefined,
                 pageTitles.join(", ") || undefined,
                 imageParts,
-                messageOrInteraction
+                messageOrInteraction,
+                tools
             );
         } else {
             reply = explicitTemplateContent || "I don't know.";
