@@ -196,8 +196,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         ? currentMessageParts[0]
                         : { role: "user", parts: currentMessageParts }
                 );
-                
-                const result = result.response;
+                const response = await result.response;
                 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const parts = response.candidates?.[0]?.content?.parts || [];
