@@ -191,12 +191,12 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                const result = await chat.sendMessage(
-                    currentMessageParts[0]?.role
+                // 💡 FIX: The @google/genai SDK expects an object with a 'message' property.
+                const response = await chat.sendMessage({
+                    message: currentMessageParts[0]?.role
                         ? currentMessageParts[0]
                         : { role: "user", parts: currentMessageParts }
-                );
-                const response = await result.response;
+                });
                 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const parts = response.candidates?.[0]?.content?.parts || [];
@@ -231,6 +231,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                                     }
                                 });
                             }
+                        } else {
+                            // 💡 FALLBACK: Always provide a response for every function call
+                            functionResponses.push({
+                                functionResponse: {
+                                    name: fnName,
+                                    response: { error: "Function not found" }
+                                }
+                            });
                         }
                     }
 
@@ -248,7 +256,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 // 2. EXTRACT TEXT safely
                 let text = "";
                 try {
-                    text = response.text();
+                    // 💡 FIX: In @google/genai, .text is a getter, not a function.
+                    text = response.text || "";
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
