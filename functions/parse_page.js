@@ -427,6 +427,62 @@ async function performSearch(query) {
     }
 }
 
+/**
+ * Tool function to fetch from the wiki.
+ * Detects if a page is a "disambiguation" page and returns options if so.
+ */
+async function searchWiki({ query }) {
+    console.log(`[Tool] Wiki request for: "${query}"`);
+
+    // Using the MediaWiki Action API to check for disambiguation properties
+    const url = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(query)}&origin=*&redirects=1`;
+
+    try {
+        const response = await fetch(url, {
+            headers: { "User-Agent": "DiscordBot/Deriv" }
+        });
+        const data = await response.json();
+        const pages = data.query?.pages;
+        if (!pages) return { error: `No wiki article found for "${query}".` };
+
+        const pageId = Object.keys(pages)[0];
+        const page = pages[pageId];
+
+        // Case 1: Page not found
+        if (pageId === "-1") {
+            return { error: `No wiki article found for "${query}".` };
+        }
+
+        // Case 2: Disambiguation detected
+        if (page.pageprops && page.pageprops.disambiguation !== undefined) {
+            // Get the first few links from the disambiguation page to show the user
+            const linksUrl = `${API}?action=query&format=json&prop=links&titles=${encodeURIComponent(query)}&pllimit=5`;
+            const linksRes = await fetch(linksUrl, {
+                headers: { "User-Agent": "DiscordBot/Deriv" }
+            });
+            const linksData = await linksRes.json();
+            const linksPageId = Object.keys(linksData.query.pages)[0];
+            const links = linksData.query.pages[linksPageId].links?.map(l => l.title) || [];
+
+            return {
+                status: "ambiguous",
+                message: "Multiple topics found. Ask the user which one they mean.",
+                options: links
+            };
+        }
+
+        // Case 3: Successful single result
+        return {
+            status: "success",
+            title: page.title,
+            summary: page.extract
+        };
+    } catch (err) {
+        console.error("searchWiki error:", err);
+        return { error: "Failed to fetch data from Wiki API." };
+    }
+}
+
 module.exports = { 
     API, 
     knownPages, 
@@ -437,5 +493,6 @@ module.exports = {
     getLeadSection, 
     parseWikiLinks, 
     parseTemplates,
-    performSearch
+    performSearch,
+    searchWiki
 };

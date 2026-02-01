@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
-const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
+const { performSearch, getWikiContent, findCanonicalTitle, knownPages, searchWiki } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js");
 
 // node-fetch
@@ -74,48 +74,19 @@ function addToHistory(channelId, role, text, username = null, timestamp = Date.n
 }
 
 // --- GEMINI FUNCTIONS ---
-function extractText(result) {
-    try {
-        const candidate = result?.candidates?.[0];
-        if (!candidate) return null;
-        const parts = candidate?.content?.parts;
-        if (parts && parts.length > 0) {
-            return parts.map(p => p.text).join("").trim();
+const searchWikiTool = {
+    functionDeclarations: [{
+        name: "searchWiki",
+        description: "Search the wiki for factual information. Use this when the user asks about a person, place, or concept related to the game.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                query: { type: "STRING", description: "The search term." }
+            },
+            required: ["query"]
         }
-        return null;
-    } catch {
-        return null;
-    }
-}
-
-// Page selection Gemini (uses GEMINI_PAGE_KEY)
-async function askGeminiForPages(userInput) {
-    const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
-    const prompt = `User asked: "${userInput}"
-From this wiki page list: ${knownPages.join(", ")}
-Pick up to at least 5 relevant page titles that best match the request. 
-Return only the exact page titles, one per line.
-If none are relevant, return "NONE".`;
-
-    try {
-        const result = await gemini.models.generateContent({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            maxOutputTokens: 100,
-        });
-        const text = extractText(result);
-        console.log(text);
-        if (!text || text === "NONE") return [];
-        return [...new Set(
-            text.split("\n")
-            .map(p => p.replace(/^["']|["']$/g, "").trim())
-            .filter(Boolean)
-        )].slice(0, 5);
-    } catch (err) {
-        console.error(`Gemini page selection error for ${BOT_NAME}: `, err);
-        return [];
-    }
-}
+    }]
+};
 
 async function runWithMainKeys(fn) {
     const keys = MAIN_KEYS;
@@ -161,13 +132,17 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             // PREPARE TOOLS CONFIGURATION
             let geminiTools = [];
 
+            // Always add searchWiki tool
+            geminiTools.push(searchWikiTool);
+
             // If custom tools (like leaderboard) are passed, add their definitions
             if (tools && tools.functionDeclarations) {
                 geminiTools.push({ functionDeclarations: tools.functionDeclarations });
-            } else {
-                // Fallback to Google Search if no custom tools are provided
-                geminiTools = [ {googleSearch: {}}, {urlContext: {}} ];
             }
+
+            // Add other tools
+            geminiTools.push({googleSearch: {}});
+            geminiTools.push({urlContext: {}});
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
@@ -211,35 +186,26 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         
                         console.log(`[Tool] Gemini calling function: ${fnName}`);
 
-                        if (tools?.functions?.[fnName]) {
+                        let fnResult;
+                        if (fnName === "searchWiki") {
+                            fnResult = await searchWiki(fnArgs);
+                        } else if (tools?.functions?.[fnName]) {
                             try {
-                                const fnResult = await tools.functions[fnName](fnArgs);
-                                
-                                // 💡 This structure is what satisfies the "ContentUnion" requirement
-                                functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: fnResult 
-                                    }
-                                });
+                                fnResult = await tools.functions[fnName](fnArgs);
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
-                                functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: { error: "Execution failed" }
-                                    }
-                                });
+                                fnResult = { error: "Execution failed" };
                             }
                         } else {
-                            // 💡 FALLBACK: Always provide a response for every function call
-                            functionResponses.push({
-                                functionResponse: {
-                                    name: fnName,
-                                    response: { error: "Function not found" }
-                                }
-                            });
+                            fnResult = { error: "Function not found" };
                         }
+
+                        functionResponses.push({
+                            functionResponse: {
+                                name: fnName,
+                                response: fnResult
+                            }
+                        });
                     }
 
                     // 💡 THE CRITICAL FIX: 
@@ -262,37 +228,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
                 text = (text || "").trim();
-                
-                // 3. Handle Legacy MW_SEARCH / MW_CONTENT tags
-                const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
-                if (searchMatch) {
-                    const query = searchMatch[1].trim();
-                    console.log(`[Tool] Searching for: ${query}`);
-                    const searchResults = await performSearch(query);
-                    currentMessageParts = [{
-                        role: "user",
-                        parts: [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }]
-                    }];
-                    continue; 
-                }
-
-                const contentMatch = text.match(/\[MW_CONTENT:\s*(.*?)\]/i);
-                if (contentMatch) {
-                    const requestedTitle = contentMatch[1].trim();
-                    console.log(`[Tool] Fetching content for: ${requestedTitle}`);
-                    const canonical = await findCanonicalTitle(requestedTitle) || requestedTitle;
-                    const content = await getWikiContent(canonical);
-                    
-                    const resultText = content 
-                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
-                        : `[SYSTEM] Page not found.`;
-
-                    currentMessageParts = [{
-                        role: "user",
-                        parts: [{ text: resultText }]
-                    }];
-                    continue;
-                }
 
                 // 4. Final Answer
                 finalResponse = text;
@@ -321,4 +256,4 @@ function getHistory(channelId) {
     return chatHistories.get(channelId) || [];
 }
 
-module.exports = { askGemini, askGeminiForPages, MESSAGES, getHistory };
+module.exports = { askGemini, MESSAGES, getHistory };
