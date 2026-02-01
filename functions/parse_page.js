@@ -404,7 +404,6 @@ async function performSearch(query) {
         action: "query",
         list: "search",
         srsearch: query,
-        srlimit: 5,
         format: "json"
     });
 
@@ -416,117 +415,15 @@ async function performSearch(query) {
         if (!res.ok) throw new Error("Search failed");
         
         const json = await res.json();
-        return json.query?.search || [];
+        const results = json.query?.search || [];
+        
+        if (results.length === 0) return "No results found.";
+
+        // Return a list of titles
+        return results.map(r => r.title).join(", ");
     } catch (err) {
         console.error("Search API error:", err);
-        return [];
-    }
-}
-
-/**
- * Tool function to fetch from the wiki.
- * Now performs a search first to find the most relevant pages.
- */
-async function searchWiki({ query }) {
-    console.log(`[Tool] Wiki request for: "${query}"`);
-
-    try {
-        // 1. Try direct lookup first (most accurate for specific titles)
-        const directUrl = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(query)}&redirects=1`;
-        const directRes = await fetch(directUrl, { headers: { "User-Agent": "DiscordBot/Derivative" } });
-
-        if (!directRes.ok) {
-            console.warn(`Direct lookup failed with status ${directRes.status}, falling back to search`);
-        } else {
-        const directData = await directRes.json();
-        const directPages = directData.query?.pages;
-
-        if (directPages) {
-            const page = Object.values(directPages)[0];
-            if (page && page.pageid && !(page.pageprops && page.pageprops.disambiguation !== undefined)) {
-                return {
-                    status: "success",
-                    title: page.title,
-                    summary: page.extract
-                };
-            }
-        }
-        }
-
-        // 2. If direct lookup failed or is ambiguous, perform a full-text search
-        const searchResults = await performSearch(query);
-
-        if (searchResults.length === 0) {
-            return { error: `No wiki articles found for "${query}".` };
-        }
-
-        // 3. Fetch content for the top results (up to 3)
-        const topResults = searchResults.slice(0, 3);
-        const pagesData = await Promise.all(topResults.map(async (result) => {
-            try {
-                const pageTitle = result.title;
-                const url = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(pageTitle)}&redirects=1`;
-                const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Derivative" } });
-                if (!res.ok) {
-                    console.warn(`Failed to fetch page "${pageTitle}": ${res.status}`);
-                    return null;
-                }
-                const data = await res.json();
-                if (!data.query?.pages) return null;
-                return Object.values(data.query.pages)[0];
-            } catch (err) {
-                console.warn(`Failed to fetch page "${result.title}":`, err.message);
-                return null;
-            }
-        }));
-
-        const validPages = pagesData.filter(p => p && p.pageid && p.extract);
-
-        if (validPages.length === 0) {
-            return { error: `No wiki content found for "${query}".` };
-        }
-
-        // Check for disambiguation in the top result
-        const firstPage = validPages[0];
-        if (firstPage.pageprops && firstPage.pageprops.disambiguation !== undefined) {
-            const linksUrl = `${API}?action=query&format=json&prop=links&titles=${encodeURIComponent(firstPage.title)}&pllimit=10`;
-            const linksRes = await fetch(linksUrl, { headers: { "User-Agent": "DiscordBot/Derivative" } });
-            if (!linksRes.ok) {
-                console.warn(`Failed to fetch disambiguation links for "${firstPage.title}": ${linksRes.status}`);
-                return {
-                    status: "ambiguous",
-                    message: "Multiple topics found. Ask the user which one they mean.",
-                    options: []
-                };
-            }
-            const linksData = await linksRes.json();
-            const links = Object.values(linksData.query?.pages || {})[0]?.links?.map(l => l.title) || [];
-
-            return {
-                status: "ambiguous",
-                message: "Multiple topics found. Ask the user which one they mean.",
-                options: links
-            };
-        }
-
-        // Return combined results from the top pages
-        const MAX_EXTRACT_LENGTH = 2000;
-        const combinedSummary = validPages.map(p => {
-            const truncatedExtract = p.extract.length > MAX_EXTRACT_LENGTH 
-                ? p.extract.slice(0, MAX_EXTRACT_LENGTH) + "..." 
-                : p.extract;
-            return `Title: ${p.title}\nSummary: ${truncatedExtract}`;
-        }).join("\n\n---\n\n");
-
-        return {
-            status: "success",
-            title: validPages.length === 1 ? firstPage.title : "Search Results",
-            summary: combinedSummary
-        };
-
-    } catch (err) {
-        console.error("searchWiki error:", err);
-        return { error: "Failed to fetch data from Wiki API." };
+        return "Error searching wiki.";
     }
 }
 
@@ -540,6 +437,5 @@ module.exports = {
     getLeadSection, 
     parseWikiLinks, 
     parseTemplates,
-    performSearch,
-    searchWiki
+    performSearch
 };
