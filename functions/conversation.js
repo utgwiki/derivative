@@ -165,11 +165,18 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                const response = await chat.sendMessage({
-                    message: currentMessageParts[0]?.role
-                        ? currentMessageParts[0]
-                        : { role: "user", parts: currentMessageParts }
-                });
+                let response;
+                try {
+                    response = await chat.sendMessage({
+                        message: currentMessageParts[0]?.role
+                            ? currentMessageParts[0]
+                            : { role: "user", parts: currentMessageParts }
+                    });
+                } catch (sendErr) {
+                    console.error("Gemini sendMessage error:", sendErr);
+                    console.error("Problematic message structure:", JSON.stringify(currentMessageParts, null, 2));
+                    throw sendErr;
+                }
                 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const parts = response.candidates?.[0]?.content?.parts || [];
@@ -181,8 +188,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     for (const call of functionCalls) {
                         const fnName = call.name;
                         const fnArgs = call.args;
+                        const fnId = call.id;
                         
-                        console.log(`[Tool] Gemini calling function: ${fnName}`);
+                        console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
 
                         let fnResult;
                         if (fnName === "searchWiki") {
@@ -200,6 +208,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
                         functionResponses.push({
                             functionResponse: {
+                                id: fnId,
                                 name: fnName,
                                 response: fnResult
                             }
@@ -208,9 +217,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         console.log(`[Tool Result] ${fnName}:`, JSON.stringify(fnResult, null, 2)); 
                     }
 
-                    // Wrap the parts in a Content object with the 'function' role
+                    // Wrap the parts in a Content object with the 'tool' role (Gemini 2.0+ standard)
                     currentMessageParts = [{
-                        role: "function",
+                        role: "tool",
                         parts: functionResponses
                     }];
                     
