@@ -434,6 +434,10 @@ async function searchWiki({ query }) {
         // 1. Try direct lookup first (most accurate for specific titles)
         const directUrl = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(query)}&redirects=1`;
         const directRes = await fetch(directUrl, { headers: { "User-Agent": "DiscordBot/Derivative" } });
+
+        if (!directRes.ok) {
+            console.warn(`Direct lookup failed with status ${directRes.status}, falling back to search`);
+        } else {
         const directData = await directRes.json();
         const directPages = directData.query?.pages;
 
@@ -446,6 +450,7 @@ async function searchWiki({ query }) {
                     summary: page.extract
                 };
             }
+        }
         }
 
         // 2. If direct lookup failed or is ambiguous, perform a full-text search
