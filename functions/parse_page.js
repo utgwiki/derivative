@@ -435,7 +435,7 @@ async function searchWiki({ query }) {
     console.log(`[Tool] Wiki request for: "${query}"`);
 
     // Using the MediaWiki Action API to check for disambiguation properties
-    const url = `${API}?action=query&format=json&prop=extracts|pageprops&exintro=1&explaintext=1&titles=${encodeURIComponent(query)}&origin=*&redirects=1`;
+    const url = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(query)}&origin=*&redirects=1`;
 
     try {
         const response = await fetch(url, {
