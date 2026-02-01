@@ -190,29 +190,22 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         } else if (tools?.functions?.[fnName]) {
                             try {
                                 fnResult = await tools.functions[fnName](fnArgs);
-                                functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: fnResult 
-                                    }
-                                });
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
-                                functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: { error: "Execution failed" }
-                                    }
-                                });
+                                fnResult = { error: "Execution failed" };
                             }
                         } else {
-                            functionResponses.push({
-                                functionResponse: {
-                                    name: fnName,
-                                    response: { error: "Function not found" }
-                                }
-                            });
+                            fnResult = { error: "Function not found" };
                         }
+
+                        functionResponses.push({
+                            functionResponse: {
+                                name: fnName,
+                                response: fnResult
+                            }
+                        });
+
+                        console.log(`[Tool Result] ${fnName}:`, JSON.stringify(fnResult, null, 2)); 
                     }
 
                     // Wrap the parts in a Content object with the 'function' role
