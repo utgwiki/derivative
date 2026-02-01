@@ -138,11 +138,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             // If custom tools (like leaderboard) are passed, add their definitions
             if (tools && tools.functionDeclarations) {
                 geminiTools.push({ functionDeclarations: tools.functionDeclarations });
+            } else {
+                // Fallback to Google Search if no custom tools are provided
+                geminiTools = [ {googleSearch: {}}, {urlContext: {}} ]
             }
-
-            // Add other tools
-            geminiTools.push({googleSearch: {}});
-            geminiTools.push({urlContext: {}});
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
