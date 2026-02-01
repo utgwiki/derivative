@@ -21,7 +21,7 @@ async function getContributionScores() {
         });
 
         const url = `${WIKI_ENDPOINTS.API}?${params.toString()}`;
-        const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+        const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Derivative" } });
         const json = await res.json();
         const html = json.parse?.text?.["*"];
 

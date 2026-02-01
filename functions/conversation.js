@@ -221,12 +221,16 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 // 2. EXTRACT TEXT safely
                 let text = "";
                 try {
-                    // 💡 FIX: In @google/genai, .text is a getter, not a function.
-                    text = response.text || "";
+                    // 💡 FIX: Robust extraction for both property and method access.
+                    if (typeof response.text === "function") {
+                        text = response.text();
+                    } else {
+                        text = response.text || "";
+                    }
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
-                text = (text || "").trim();
+                text = String(text || "").trim();
 
                 // 4. Final Answer
                 finalResponse = text;

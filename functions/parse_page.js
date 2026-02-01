@@ -16,7 +16,7 @@ async function getAllNamespaces() {
             format: "json"
         });
         const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         if (!res.ok) throw new Error(`Namespaces fetch failed: ${res.status}`);
         const json = await res.json();
@@ -67,7 +67,7 @@ async function getAllPages() {
 
                 const url = `${API}?${params.toString()}`;
                 const res = await fetch(url, {
-                    headers: { "User-Agent": "DiscordBot/Ploob" }
+                    headers: { "User-Agent": "DiscordBot/Derivative" }
                 });
                 if (!res.ok) throw new Error(`Failed: ${res.status} ${res.statusText}`);
                 const json = await res.json();
@@ -145,7 +145,7 @@ async function findCanonicalTitle(input) {
                 redirects: "1",
                 indexpageids: "1"
             });
-            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Ploob" } });
+            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Derivative" } });
             if (!res.ok) continue;
             const json = await res.json();
 
@@ -189,7 +189,7 @@ async function getWikiContent(pageTitle) {
     try {
         const res = await fetch(`${API}?${params.toString()}`, {
             headers: {
-                "User-Agent": "DiscordBot/Ploob",
+                "User-Agent": "DiscordBot/Derivative",
                 "Origin": WIKI_ENDPOINTS.BASE,
             },
         });
@@ -223,7 +223,7 @@ async function getSectionIndex(pageTitle, sectionName) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Ploob" }
+            headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const json = await res.json();
@@ -259,7 +259,7 @@ async function getSectionContent(pageTitle, sectionName) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Ploob" }
+            headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         const json = await res.json();
 
@@ -283,7 +283,7 @@ async function getLeadSection(pageTitle) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Ploob" }
+            headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         const json = await res.json();
         const html = json.parse?.text?.["*"];
@@ -409,7 +409,7 @@ async function performSearch(query) {
 
     try {
         const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Ploob" }
+            headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         
         if (!res.ok) throw new Error("Search failed");
@@ -439,7 +439,7 @@ async function searchWiki({ query }) {
 
     try {
         const response = await fetch(url, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         const data = await response.json();
         const pages = data.query?.pages;
@@ -448,8 +448,8 @@ async function searchWiki({ query }) {
         const pageId = Object.keys(pages)[0];
         const page = pages[pageId];
 
-        // Case 1: Page not found
-        if (pageId === "-1") {
+        // Case 1: Page not found or invalid
+        if (!page || pageId === "-1") {
             return { error: `No wiki article found for "${query}".` };
         }
 
@@ -458,11 +458,15 @@ async function searchWiki({ query }) {
             // Get the first few links from the disambiguation page to show the user
             const linksUrl = `${API}?action=query&format=json&prop=links&titles=${encodeURIComponent(query)}&pllimit=5`;
             const linksRes = await fetch(linksUrl, {
-                headers: { "User-Agent": "DiscordBot/Deriv" }
+                headers: { "User-Agent": "DiscordBot/Derivative" }
             });
             const linksData = await linksRes.json();
-            const linksPageId = Object.keys(linksData.query.pages)[0];
-            const links = linksData.query.pages[linksPageId].links?.map(l => l.title) || [];
+            const linksPages = linksData.query?.pages;
+            let links = [];
+            if (linksPages) {
+                const linksPageId = Object.keys(linksPages)[0];
+                links = linksPages[linksPageId]?.links?.map(l => l.title) || [];
+            }
 
             return {
                 status: "ambiguous",
