@@ -165,7 +165,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                // 💡 FIX: The @google/genai SDK expects an object with a 'message' property.
                 const response = await chat.sendMessage({
                     message: currentMessageParts[0]?.role
                         ? currentMessageParts[0]
@@ -191,25 +190,32 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         } else if (tools?.functions?.[fnName]) {
                             try {
                                 fnResult = await tools.functions[fnName](fnArgs);
+                                functionResponses.push({
+                                    functionResponse: {
+                                        name: fnName,
+                                        response: fnResult 
+                                    }
+                                });
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
-                                fnResult = { error: "Execution failed" };
+                                functionResponses.push({
+                                    functionResponse: {
+                                        name: fnName,
+                                        response: { error: "Execution failed" }
+                                    }
+                                });
                             }
                         } else {
-                            fnResult = { error: "Function not found" };
+                            functionResponses.push({
+                                functionResponse: {
+                                    name: fnName,
+                                    response: { error: "Function not found" }
+                                }
+                            });
                         }
-
-                        functionResponses.push({
-                            functionResponse: {
-                                name: fnName,
-                                response: fnResult
-                            }
-                        });
                     }
 
-                    // 💡 THE CRITICAL FIX: 
-                    // Wrap the parts in a Content object with the 'function' role.
-                    // This is what prevents the ContentUnion error on the next sendMessage() call.
+                    // Wrap the parts in a Content object with the 'function' role
                     currentMessageParts = [{
                         role: "function",
                         parts: functionResponses
