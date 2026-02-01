@@ -467,6 +467,10 @@ async function searchWiki({ query }) {
                 const pageTitle = result.title;
                 const url = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(pageTitle)}&redirects=1`;
                 const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Derivative" } });
+                if (!res.ok) {
+                    console.warn(`Failed to fetch page "${pageTitle}": ${res.status}`);
+                    return null;
+                }
                 const data = await res.json();
                 if (!data.query?.pages) return null;
                 return Object.values(data.query.pages)[0];
@@ -487,6 +491,14 @@ async function searchWiki({ query }) {
         if (firstPage.pageprops && firstPage.pageprops.disambiguation !== undefined) {
             const linksUrl = `${API}?action=query&format=json&prop=links&titles=${encodeURIComponent(firstPage.title)}&pllimit=10`;
             const linksRes = await fetch(linksUrl, { headers: { "User-Agent": "DiscordBot/Derivative" } });
+            if (!linksRes.ok) {
+                console.warn(`Failed to fetch disambiguation links for "${firstPage.title}": ${linksRes.status}`);
+                return {
+                    status: "ambiguous",
+                    message: "Multiple topics found. Ask the user which one they mean.",
+                    options: []
+                };
+            }
             const linksData = await linksRes.json();
             const links = Object.values(linksData.query?.pages || {})[0]?.links?.map(l => l.title) || [];
 
