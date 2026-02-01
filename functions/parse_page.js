@@ -458,12 +458,17 @@ async function searchWiki({ query }) {
         // 3. Fetch content for the top results (up to 3)
         const topResults = searchResults.slice(0, 3);
         const pagesData = await Promise.all(topResults.map(async (result) => {
-            const pageTitle = result.title;
-            const url = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(pageTitle)}&redirects=1`;
-            const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Derivative" } });
-            const data = await res.json();
-            if (!data.query?.pages) return null;
-            return Object.values(data.query.pages)[0];
+            try {
+                const pageTitle = result.title;
+                const url = `${API}?action=query&format=json&prop=extracts|pageprops&explaintext=1&titles=${encodeURIComponent(pageTitle)}&redirects=1`;
+                const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Derivative" } });
+                const data = await res.json();
+                if (!data.query?.pages) return null;
+                return Object.values(data.query.pages)[0];
+            } catch (err) {
+                console.warn(`Failed to fetch page "${result.title}":`, err.message);
+                return null;
+            }
         }));
 
         const validPages = pagesData.filter(p => p && p.pageid && p.extract);
@@ -488,7 +493,13 @@ async function searchWiki({ query }) {
         }
 
         // Return combined results from the top pages
-        const combinedSummary = validPages.map(p => `Title: ${p.title}\nSummary: ${p.extract}`).join("\n\n---\n\n");
+        const MAX_EXTRACT_LENGTH = 2000;
+        const combinedSummary = validPages.map(p => {
+            const truncatedExtract = p.extract.length > MAX_EXTRACT_LENGTH 
+                ? p.extract.slice(0, MAX_EXTRACT_LENGTH) + "..." 
+                : p.extract;
+            return `Title: ${p.title}\nSummary: ${truncatedExtract}`;
+        }).join("\n\n---\n\n");
 
         return {
             status: "success",
