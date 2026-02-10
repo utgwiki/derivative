@@ -31,10 +31,10 @@ function htmlToMarkdown(html, baseUrl) {
         switch (node.name) {
             case 'b':
             case 'strong':
-                return `**${childrenContent}**`;
+                return childrenContent.trim() ? `**${childrenContent.trim()}**` : '';
             case 'i':
             case 'em':
-                return `*${childrenContent}*`;
+                return childrenContent.trim() ? `*${childrenContent.trim()}*` : '';
             case 'a':
                 let href = $node.attr('href');
                 if (href) {
@@ -43,8 +43,8 @@ function htmlToMarkdown(html, baseUrl) {
                     } else if (!href.startsWith('http')) {
                         try { href = new URL(href, baseUrl).href; } catch (e) {}
                     }
-                    const text = childrenContent.replace(/\[/g, '\\[').replace(/\]/g, '\\]');
-                    return `[${text}](<${href}>)`;
+                    const text = childrenContent.trim().replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+                    return text ? `[${text}](<${href}>)` : '';
                 }
                 return childrenContent;
             case 'br':
@@ -341,19 +341,23 @@ async function getSectionContent(pageTitle, sectionName) {
 
 async function getLeadSection(pageTitle) {
     const params = new URLSearchParams({
-        action: "parse",
-        format: "json",
-        prop: "text",
-        page: pageTitle,
-        section: "0"
+        action: "query",
+        prop: "extracts",
+        exintro: "1",
+        redirects: "1",
+        titles: pageTitle,
+        format: "json"
     });
 
     try {
-        const res = await fetch(`${API}?${params}`, {
+        const res = await fetch(`${API}?${params.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         const json = await res.json();
-        const html = json.parse?.text?.["*"];
+        const pages = json.query?.pages;
+        if (!pages) return null;
+        const page = Object.values(pages)[0];
+        const html = page?.extract;
         if (!html) return null;
         return htmlToMarkdown(html, WIKI_ENDPOINTS.BASE);
     } catch (err) {
