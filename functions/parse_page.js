@@ -1,10 +1,82 @@
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const cheerio = require('cheerio');
 
 const { WIKI_ENDPOINTS } = require("../config.js");
 const API = WIKI_ENDPOINTS.API;
 
 let knownPages = [];
 let pageLookup = new Map();
+
+// --- UTILITIES ---
+function htmlToMarkdown(html, baseUrl) {
+    if (!html) return "";
+    const $ = cheerio.load(html);
+
+    // Remove unwanted elements
+    $('style, script, .thumb, figure, table, .mw-editsection, sup.reference, .noprint, .nomobile, .error').remove();
+
+    function convertNode(node) {
+        if (node.type === 'text') {
+            return node.data;
+        }
+
+        const $node = $(node);
+        let childrenContent = '';
+        if (node.children) {
+            node.children.forEach((child) => {
+                childrenContent += convertNode(child);
+            });
+        }
+
+        switch (node.name) {
+            case 'b':
+            case 'strong':
+                return `**${childrenContent}**`;
+            case 'i':
+            case 'em':
+                return `*${childrenContent}*`;
+            case 'a':
+                let href = $node.attr('href');
+                if (href) {
+                    if (href.startsWith('/')) {
+                        href = new URL(href, baseUrl).href;
+                    } else if (!href.startsWith('http')) {
+                        try { href = new URL(href, baseUrl).href; } catch (e) {}
+                    }
+                    const text = childrenContent.replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+                    return `[${text}](<${href}>)`;
+                }
+                return childrenContent;
+            case 'br':
+                return '\n';
+            case 'p':
+            case 'div':
+            case 'h1':
+            case 'h2':
+            case 'h3':
+            case 'h4':
+            case 'h5':
+            case 'h6':
+            case 'li':
+                return `${childrenContent}\n`;
+            default:
+                return childrenContent;
+        }
+    }
+
+    let text = '';
+    const root = $('.mw-parser-output').length ? $('.mw-parser-output') : $.root();
+    root.contents().each((i, node) => {
+        text += convertNode(node);
+    });
+
+    // Fix formatting: collapse multiple spaces and handle newlines
+    text = text.replace(/[ \t]+/g, ' '); // Collapse spaces/tabs
+    text = text.replace(/\n\s*\n/g, '\n\n'); // Max two newlines
+    text = text.replace(/ +/g, ' '); // One more pass for space cleanup after newline adjustments
+
+    return text.trim();
+}
 
 // --- WIKI API FUNCTIONS ---
 async function getAllNamespaces() {
@@ -183,7 +255,7 @@ async function getWikiContent(pageTitle) {
         action: "parse",
         page: pageTitle,
         format: "json",
-        prop: "text|images",
+        prop: "text",
     });
 
     try {
@@ -198,12 +270,7 @@ async function getWikiContent(pageTitle) {
         const json = await res.json();
 
         if (json?.parse?.text?.["*"]) {
-            const html = json.parse.text["*"];
-
-            const noStyle = html.replace(/<style[\s\S]*?<\/style>/gi, "");
-            const stripped = noStyle.replace(/<[^>]*>/g, "");
-
-            return stripped;
+            return htmlToMarkdown(json.parse.text["*"], WIKI_ENDPOINTS.BASE);
         }
         return null;
     } catch (err) {
@@ -232,7 +299,7 @@ async function getSectionIndex(pageTitle, sectionName) {
         if (!sections.length) return null;
 
         const match = sections.find(
-            s => s.line.toLowerCase() === sectionName.toLowerCase()
+            s => s.line.replace(/<[^>]*>?/gm, "").toLowerCase() === sectionName.toLowerCase()
         );
 
         return match?.index || null;
@@ -265,7 +332,7 @@ async function getSectionContent(pageTitle, sectionName) {
 
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-        return html.replace(/<[^>]*>?/gm, ""); // strip HTML
+        return htmlToMarkdown(html, WIKI_ENDPOINTS.BASE);
     } catch (err) {
         console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
         return null;
@@ -288,7 +355,7 @@ async function getLeadSection(pageTitle) {
         const json = await res.json();
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-        return html.replace(/<[^>]*>?/gm, ""); // Strip HTML
+        return htmlToMarkdown(html, WIKI_ENDPOINTS.BASE);
     } catch (err) {
         console.error(`Failed to fetch lead section for "${pageTitle}":`, err.message);
         return null;
