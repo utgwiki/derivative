@@ -360,17 +360,13 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             if (canonical) {
                 shouldUseComponentsV2 = true;
                 skipGemini = true; 
-                explicitTemplateFoundTitle = canonical;
 
                 if (sectionName) {
                     explicitTemplateContent = await getSectionContent(canonical, sectionName);
+                    explicitTemplateFoundTitle = `${canonical}#${sectionName}`;
                 } else {
-                    const extractRes = await fetch(
-                        `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
-                    );
-                    const extractJson = await extractRes.json();
-                    const pageObj = Object.values(extractJson.query.pages)[0];
-                    explicitTemplateContent = pageObj.extract || "No content available.";
+                    explicitTemplateContent = await getLeadSection(canonical);
+                    explicitTemplateFoundTitle = canonical;
                 }
                 explicitTemplateName = rawTemplate;
             } else {
@@ -572,13 +568,8 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
 
             for (const title of secondaryEmbedTitles) {
                 try {
-                    // 1. Fetch content (Lead section or Extract)                    
-                    const extractRes = await fetch(
-                       `${WIKI_ENDPOINTS.API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(title)}&format=json`
-                    );
-                    const extractJson = await extractRes.json();
-                    const pageObj = Object.values(extractJson.query.pages)[0];
-                    let wikiAbstract = pageObj.extract || "No content available.";
+                    // 1. Fetch content (Lead section)
+                    let wikiAbstract = await getLeadSection(title) || "No content available.";
                     
                     if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
 
