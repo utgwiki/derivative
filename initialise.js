@@ -180,7 +180,17 @@ function buildPageEmbed(title, content, imageUrl, gallery = null) {
                 pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}Special:ContributionScores`;
             } else {
                 const isSectionLink = String(title).includes(" § ");
-                const [pageOnly, frag] = isSectionLink ? String(title).split(" § ") : String(title).split("#");
+                const titleStr = String(title);
+                let pageOnly, frag;
+                if (isSectionLink) {
+                    const idx = titleStr.indexOf(" § ");
+                    pageOnly = idx !== -1 ? titleStr.slice(0, idx) : titleStr;
+                    frag = idx !== -1 ? titleStr.slice(idx + 3) : undefined;
+                } else {
+                    const idx = titleStr.indexOf("#");
+                    pageOnly = idx !== -1 ? titleStr.slice(0, idx) : titleStr;
+                    frag = idx !== -1 ? titleStr.slice(idx + 1) : undefined;
+                }
                 const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
                 const anchor = frag ? '#' + encodeURIComponent(frag.replace(/ /g, '_')) : '';
                 pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${anchor}`;

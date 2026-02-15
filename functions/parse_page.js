@@ -247,6 +247,7 @@ async function findCanonicalTitle(input) {
         const res = await fetch(`${API}?${directParams.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const pageId = json.query?.pageids?.[0];
         const page = json.query?.pages?.[pageId];
