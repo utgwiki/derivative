@@ -8,12 +8,37 @@ let knownPages = [];
 let pageLookup = new Map();
 
 // --- UTILITIES ---
+function getFullSizeImageUrl(url) {
+    if (!url || !url.includes('/thumb/')) return url;
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.pathname.includes('/thumb/')) {
+            // Remove /thumb/ from pathname
+            urlObj.pathname = urlObj.pathname.replace(/\/thumb\//, '/');
+            // Remove the last segment (thumbnail size part)
+            const pathParts = urlObj.pathname.split('/');
+            pathParts.pop();
+            urlObj.pathname = pathParts.join('/');
+            return urlObj.href;
+        }
+    } catch (e) {
+        // Fallback for weird URLs
+        let newUrl = url.replace(/\/thumb\//, '/');
+        const lastSlash = newUrl.lastIndexOf('/');
+        if (lastSlash !== -1) {
+            newUrl = newUrl.substring(0, lastSlash);
+        }
+        return newUrl;
+    }
+    return url;
+}
+
 function htmlToMarkdown(html, baseUrl) {
     if (!html) return "";
     const $ = cheerio.load(html);
 
     // Remove unwanted elements
-    $('style, script, .thumb, figure, table, .mw-editsection, sup.reference, .noprint, .nomobile, .error, input, .ext-floatingui-content, .infobox, .portable-infobox, table[class*="infobox"]').remove();
+    $('style, script, .thumb, figure, table, .mw-editsection, sup.reference, .noprint, .nomobile, .error, input, .ext-floatingui-content, .infobox, .portable-infobox, table[class*="infobox"], ol.references, .mw-collapsed, .template-navplate').remove();
 
     function convertNode(node) {
         if (node.type === 'text') {
@@ -51,14 +76,22 @@ function htmlToMarkdown(html, baseUrl) {
                 return '\n';
             case 'p':
             case 'div':
+                return `${childrenContent}\n`;
+            case 'li': {
+                const isOrdered = node.parent && node.parent.name === 'ol';
+                const prefix = isOrdered
+                    ? `${Array.from(node.parent.children).filter(c => c.name === 'li').indexOf(node) + 1}. `
+                    : '* ';
+                return `${prefix}${childrenContent.trim()}\n`;
+            }
             case 'h1':
             case 'h2':
+                return childrenContent.trim() ? `## ${childrenContent.trim()}\n` : '';
             case 'h3':
             case 'h4':
             case 'h5':
             case 'h6':
-            case 'li':
-                return `${childrenContent}\n`;
+                return childrenContent.trim() ? `### ${childrenContent.trim()}\n` : '';
             default:
                 return childrenContent;
         }
@@ -203,48 +236,58 @@ async function findCanonicalTitle(input) {
     }
 
     try {
-        const titleTryVariants = [
-            raw,
-            norm,
-            norm.split(":").map((s, i) => i === 0 ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("_")).join(":")
-        ].filter(Boolean);
+        const directParams = new URLSearchParams({
+            action: "query",
+            format: "json",
+            titles: raw,
+            redirects: "1",
+            indexpageids: "1"
+        });
 
-        for (const t of titleTryVariants) {
-            const params = new URLSearchParams({
-                action: "query",
-                format: "json",
-                titles: t.replace(/ /g, "_"),
-                redirects: "1",
-                indexpageids: "1"
-            });
-            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Derivative" } });
-            if (!res.ok) continue;
-            const json = await res.json();
+        const res = await fetch(`${API}?${directParams.toString()}`, {
+            headers: { "User-Agent": "DiscordBot/Derivative" }
+        });
+        const json = await res.json();
+        const pageId = json.query?.pageids?.[0];
+        const page = json.query?.pages?.[pageId];
 
-            const pageids = json.query?.pageids || [];
-            if (pageids.length === 0) continue;
-            const page = json.query.pages[pageids[0]];
-            if (!page) continue;
-            if (page.missing !== undefined) continue;
-
-            let canonicalTitle = page.title; 
+        if (page && page.missing === undefined) {
+            let canonicalTitle = page.title;
             const redirects = json.query?.redirects || [];
             let fragment = null;
             if (redirects.length) {
                 const rd = redirects.find(r => r.tofragment) || redirects[0];
                 if (rd?.tofragment) fragment = rd.tofragment;
             }
-
             if (fragment) canonicalTitle = `${canonicalTitle}#${fragment}`;
 
             pageLookup.set(page.title.toLowerCase(), page.title);
             pageLookup.set(page.title.replace(/_/g, " ").toLowerCase(), page.title);
-            pageLookup.set((canonicalTitle).toLowerCase(), canonicalTitle);
-
+            pageLookup.set(canonicalTitle.toLowerCase(), canonicalTitle);
             return canonicalTitle;
         }
+
+        // use case insensitive search
+        const searchParams = new URLSearchParams({
+            action: "query",
+            list: "search",
+            srsearch: raw,
+            srlimit: "1",
+            format: "json"
+        });
+
+        const searchRes = await fetch(`${API}?${searchParams.toString()}`, {
+            headers: { "User-Agent": "DiscordBot/Derivative" }
+        });
+        const searchJson = await searchRes.json();
+        const topResult = searchJson.query?.search?.[0];
+
+        if (topResult) {
+            pageLookup.set(topResult.title.toLowerCase(), topResult.title);
+            return topResult.title;
+        }
     } catch (err) {
-        console.warn("findCanonicalTitle API lookup failed:", err?.message || err);
+        console.warn("findCanonicalTitle lookup failed:", err?.message || err);
     }
 
     return null;
@@ -302,7 +345,12 @@ async function getSectionIndex(pageTitle, sectionName) {
             s => s.line.replace(/<[^>]*>?/gm, "").toLowerCase() === sectionName.toLowerCase()
         );
 
-        return match?.index || null;
+        if (!match) return null;
+
+        return {
+            index: match.index,
+            line: match.line.replace(/<[^>]*>?/gm, "")
+        };
     } catch (err) {
         console.error(`Failed to fetch section index for "${sectionName}" in "${pageTitle}":`, err.message);
         return null;
@@ -310,8 +358,8 @@ async function getSectionIndex(pageTitle, sectionName) {
 }
 
 async function getSectionContent(pageTitle, sectionName) {
-    const sectionIndex = await getSectionIndex(pageTitle, sectionName);
-    if (!sectionIndex) {
+    const sectionInfo = await getSectionIndex(pageTitle, sectionName);
+    if (!sectionInfo) {
         console.warn(`Section "${sectionName}" not found in "${pageTitle}"`);
         return null;
     }
@@ -321,7 +369,7 @@ async function getSectionContent(pageTitle, sectionName) {
         format: "json",
         prop: "text",
         page: pageTitle,
-        section: sectionIndex
+        section: sectionInfo.index
     });
 
     try {
@@ -332,7 +380,37 @@ async function getSectionContent(pageTitle, sectionName) {
 
         const html = json.parse?.text?.["*"];
         if (!html) return null;
-        return htmlToMarkdown(html, WIKI_ENDPOINTS.BASE);
+
+        const $ = cheerio.load(html);
+        const galleryItems = [];
+
+        $('ul.gallery .gallerybox').each((i, el) => {
+            const $el = $(el);
+            const img = $el.find('img').first();
+            let src = img.attr('src');
+
+            if (src) {
+                if (src.startsWith('//')) src = 'https:' + src;
+                else if (src.startsWith('/')) src = new URL(src, WIKI_ENDPOINTS.BASE).href;
+
+                // Transform to full-size URL
+                src = getFullSizeImageUrl(src);
+
+                const caption = $el.find('.gallerytext').text().trim();
+                galleryItems.push({ url: src, caption });
+            }
+        });
+
+        // Remove gallery from HTML to avoid duplicating captions in content
+        if (galleryItems.length > 0) {
+            $('ul.gallery').remove();
+        }
+
+        return {
+            content: htmlToMarkdown($.html(), WIKI_ENDPOINTS.BASE),
+            displayTitle: sectionInfo.line,
+            gallery: galleryItems.length > 0 ? galleryItems : null
+        };
     } catch (err) {
         console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
         return null;
@@ -448,12 +526,14 @@ async function parseTemplates(text) {
             wikiText = null;
         }
 
-        if (wikiText) {
+        const actualText = (wikiText && typeof wikiText === 'object') ? wikiText.content : wikiText;
+
+        if (actualText) {
             const parts = pageOnly.split(':').map(seg => encodeURIComponent(seg.replace(/ /g, "_")));
             const anchor = fragment ? `#${encodeURIComponent(fragment.replace(/ /g, "_"))}` : '';
             const link = `<${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${anchor}>`;
 
-            replacement = `**${templateName}** → ${wikiText.slice(0,1000)}\n${link}`;
+            replacement = `**${templateName}** → ${actualText.slice(0,1000)}\n${link}`;
         } else {
             replacement = "I don't know.";
         }
@@ -508,5 +588,6 @@ module.exports = {
     getLeadSection, 
     parseWikiLinks, 
     parseTemplates,
-    performSearch
+    performSearch,
+    getFullSizeImageUrl
 };

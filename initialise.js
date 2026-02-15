@@ -16,6 +16,7 @@ const {
     getLeadSection, 
     parseWikiLinks, 
     parseTemplates,
+    getFullSizeImageUrl,
     knownPages, 
     API         
 } = require("./functions/parse_page.js");
@@ -33,6 +34,9 @@ const {
     ContainerBuilder,
     SectionBuilder,
     TextDisplayBuilder,
+    ThumbnailBuilder,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
     ButtonBuilder,
     ButtonStyle,
     ActionRowBuilder,
@@ -119,45 +123,82 @@ function extractTaggedBotChunks(text) {
 }
 
 // --- NEW: UNIFIED COMPONENT BUILDER ---
-function buildPageEmbed(title, content, imageUrl) {
+function buildPageEmbed(title, content, imageUrl, gallery = null) {
     const container = new ContainerBuilder();
-    const mainSection = new SectionBuilder();
-
-    // 1. Text Content
-    mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(content)]);
     
-    // 2. Image (Thumbnail)
-    const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png"; 
-    const finalImageUrl = (typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
-    
-    try {
-        mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
-    } catch (err) { }      
+    const hasContent = content && content !== "No content available.";
+    const hasGallery = gallery && gallery.length > 0;
 
-    if (mainSection.components && mainSection.components.length > 0) {
-        // filter undefined
-        mainSection.components = mainSection.components.filter(c => c !== undefined);
-        if (mainSection.components.length > 0) {
+    // Suppression logic: if content is ONLY the "## Gallery" header and we have a media gallery, don't show the text section.
+    const isOnlyGalleryHeader = hasContent && content.trim() === "## Gallery";
+    const shouldShowTextSection = hasContent && !(isOnlyGalleryHeader && hasGallery);
+
+    const showEmbed = shouldShowTextSection || hasGallery;
+
+    if (showEmbed) {
+        const mainSection = new SectionBuilder();
+
+        // 1. Text Content
+        if (shouldShowTextSection) {
+            mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(content)]);
+
+            // SectionBuilder requires an accessory (Thumbnail or Button) in this version of discord.js.
+            // We use the provided imageUrl, or a fallback transparent image.
+            const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png";
+
+            // If hasGallery is true, we use the fallback to avoid duplicate images (thumbnail + gallery)
+            const finalImageUrl = (!hasGallery && typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
+
+            try {
+                mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
+            } catch (err) {
+                console.warn("Failed to set thumbnail accessory:", err.message);
+            }
+
             container.addSectionComponents(mainSection);
+        }
+
+        // 2. Media Gallery (top-level container component)
+        if (hasGallery) {
+            const mediaGallery = new MediaGalleryBuilder();
+            gallery.slice(0, 10).forEach(item => {
+                const galleryItem = new MediaGalleryItemBuilder().setURL(item.url);
+                if (item.caption) {
+                    galleryItem.setDescription(item.caption.slice(0, 1000));
+                }
+                mediaGallery.addItems(galleryItem);
+            });
+            container.addMediaGalleryComponents(mediaGallery);
         }
     }
     
     // 3. Action Row (Link Button)
     if (title) {
         try {
-            const [pageOnly, frag] = String(title).split("#");
-            const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
-            const pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${frag ? '#'+encodeURIComponent(frag.replace(/ /g,'_')) : ''}`;
+            let pageUrl;
+            if (title === "Special:ContributionScores") {
+                pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}Special:ContributionScores`;
+            } else {
+                const isSectionLink = String(title).includes(" § ");
+                const [pageOnly, frag] = isSectionLink ? String(title).split(" § ") : String(title).split("#");
+                const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
+                const anchor = frag ? '#' + encodeURIComponent(frag.replace(/ /g, '_')) : '';
+                pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${anchor}`;
+            }
             
             const row = new ActionRowBuilder();
             const btn = new ButtonBuilder()
                 .setLabel(String(title).slice(0, 80))
                 .setStyle(ButtonStyle.Link)
                 .setURL(pageUrl);
+
+            // We don't have emoji in the single-wiki config currently, but we can add it if needed.
     
             if (btn) row.addComponents(btn);
             if (row.components.length > 0) container.addActionRowComponents(row);
-        } catch (err) {}
+        } catch (err) {
+            console.warn("Failed to build link button:", err.message);
+        }
     }
 
     return container;
@@ -340,6 +381,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
+        let explicitTemplateGallery = null;
         const templateMatch = rawUserMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}|\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/);
 
         let shouldUseComponentsV2 = false;
@@ -362,8 +404,15 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 skipGemini = true; 
 
                 if (sectionName) {
-                    explicitTemplateContent = await getSectionContent(canonical, sectionName);
-                    explicitTemplateFoundTitle = `${canonical}#${sectionName}`;
+                    const sectionData = await getSectionContent(canonical, sectionName);
+                    if (sectionData) {
+                        explicitTemplateContent = sectionData.content;
+                        explicitTemplateFoundTitle = `${canonical} § ${sectionData.displayTitle}`;
+                        explicitTemplateGallery = sectionData.gallery;
+                    } else {
+                        explicitTemplateContent = "No content available.";
+                        explicitTemplateFoundTitle = `${canonical}#${sectionName}`;
+                    }
                 } else {
                     explicitTemplateContent = await getLeadSection(canonical);
                     explicitTemplateFoundTitle = canonical;
@@ -463,11 +512,14 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
         const fetchPageImage = async (title) => {
             if (!title) return null;
             try {
-                const imageRes = await fetch(`${API}?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&pithumbsize=512&format=json`);
+                // Remove fragment for image lookup if present
+                const cleanTitle = title.includes(" § ") ? title.split(" § ")[0] : title.split("#")[0];
+                const imageRes = await fetch(`${API}?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=pageimages&pithumbsize=512&format=json`);
                 const imageJson = await imageRes.json();
                 const pages = imageJson.query?.pages;
                 const first = pages ? Object.values(pages)[0] : null;
-                return first?.thumbnail?.source || null;
+                const src = first?.thumbnail?.source || null;
+                return getFullSizeImageUrl(src);
             } catch (err) {
                 return null;
             }
@@ -487,7 +539,8 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 const container = buildPageEmbed(
                     explicitTemplateFoundTitle, 
                     parsedReply, // For explicit user trigger, the 'reply' IS the content (extracted text)
-                    primaryImageUrl
+                    primaryImageUrl,
+                    explicitTemplateGallery
                 );
                 
                 if (container.components && container.components.length > 0) {
@@ -569,7 +622,23 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
             for (const title of secondaryEmbedTitles) {
                 try {
                     // 1. Fetch content (Lead section)
-                    let wikiAbstract = await getLeadSection(title) || "No content available.";
+                    let wikiAbstract = null;
+                    let gallery = null;
+                    let displayTitle = title;
+
+                    if (title.includes("#")) {
+                        const [page, section] = title.split("#");
+                        const sectionData = await getSectionContent(page.trim(), section.trim());
+                        if (sectionData) {
+                            wikiAbstract = sectionData.content;
+                            displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
+                            gallery = sectionData.gallery;
+                        }
+                    } else {
+                        wikiAbstract = await getLeadSection(title);
+                    }
+
+                    if (!wikiAbstract) wikiAbstract = "No content available.";
                     
                     if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
 
@@ -577,7 +646,7 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                     const cardImageUrl = await fetchPageImage(title);
 
                     // 3. Build Container using SHARED function
-                    const container = buildPageEmbed(title, wikiAbstract, cardImageUrl);
+                    const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, gallery);
 
                     // 4. Send
                     const embedPayload = {
