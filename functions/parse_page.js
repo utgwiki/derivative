@@ -272,9 +272,8 @@ async function findCanonicalTitle(input) {
         const searchParams = new URLSearchParams({
             action: "query",
             list: "search",
-            srsearch: raw,
+            srsearch: `intitle:${raw}`,
             srlimit: "1",
-            // srwhat: "title",
             format: "json"
         });
 
