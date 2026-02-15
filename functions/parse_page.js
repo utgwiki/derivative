@@ -274,7 +274,7 @@ async function findCanonicalTitle(input) {
             list: "search",
             srsearch: raw,
             srlimit: "1",
-            srwhat: "title",
+            // srwhat: "title",
             format: "json"
         });
 
