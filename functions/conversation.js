@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
-const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
+const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
 const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js");
 
@@ -71,6 +71,44 @@ function addToHistory(channelId, role, text, username = null, timestamp = Date.n
 
     const nameForJson = username || role.toUpperCase();
     logMessage(channelId, nameForJson, text, timestamp);
+}
+
+function persistConversationTurns(channelId, userTurn, modelTurn) {
+    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    const history = chatHistories.get(channelId);
+
+    const turns = [
+        { role: "user", ...userTurn },
+        { role: "model", ...modelTurn }
+    ];
+
+    const logs = [];
+
+    for (const turn of turns) {
+        const { role, text, username, timestamp } = turn;
+        const timeStr = formatTime(timestamp);
+        const prefix = username
+            ? `[${role}: ${username}] [Time: ${timeStr}]`
+            : `[${role}] [Time: ${timeStr}]`;
+        const fullText = `${prefix} ${text}`;
+
+        history.push({
+            role,
+            parts: [{ text: fullText }]
+        });
+
+        logs.push({
+            memberName: username || role.toUpperCase(),
+            message: text,
+            timestamp: timestamp
+        });
+    }
+
+    if (history.length > 30) {
+        history.splice(0, history.length - 30);
+    }
+
+    logMessagesBatch(channelId, logs);
 }
 
 // --- GEMINI FUNCTIONS ---
@@ -191,11 +229,11 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                // 💡 FIX: The @google/genai SDK expects an object with a 'message' property.
+                // 💡 FIX: Pass PartUnion (string/Part/Part[]) instead of Content object.
                 const response = await chat.sendMessage({
-                    message: currentMessageParts[0]?.role
-                        ? currentMessageParts[0]
-                        : { role: "user", parts: currentMessageParts }
+                    message: currentMessageParts[0]?.role === "tool"
+                        ? currentMessageParts[0].parts
+                        : currentMessageParts
                 });
 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
@@ -219,37 +257,23 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         
                         console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
 
+                        const createResponse = (res) => {
+                            const payload = { name: fnName, response: res };
+                            if (fnId) payload.id = fnId;
+                            return { functionResponse: payload };
+                        };
+
                         if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
-                                
-                                // 💡 This structure is what satisfies the "ContentUnion" requirement
-                                functionResponses.push({
-                                    functionResponse: {
-                                        id: fnId, // Including ID
-                                        name: fnName,
-                                        response: fnResult 
-                                    }
-                                });
+                                functionResponses.push(createResponse(fnResult));
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
-                                functionResponses.push({
-                                    functionResponse: {
-                                        id: fnId, // Including ID
-                                        name: fnName,
-                                        response: { error: "Execution failed" }
-                                    }
-                                });
+                                functionResponses.push(createResponse({ error: "Execution failed" }));
                             }
                         } else {
                             // 💡 FALLBACK: Always provide a response for every function call
-                            functionResponses.push({
-                                functionResponse: {
-                                    id: fnId, // Including ID
-                                    name: fnName,
-                                    response: { error: "Function not found" }
-                                }
-                            });
+                            functionResponses.push(createResponse({ error: "Function not found" }));
                         }
                     }
 
@@ -332,8 +356,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             // 💡 SYNC HISTORY: Persist both user and model turns together after success
             if (finalResponse !== MESSAGES.aiServiceError && finalResponse !== MESSAGES.processingError) {
                 const username = message?.author?.username || "User";
-                addToHistory(channelId, "user", userInput, username, currentTimestamp);
-                addToHistory(channelId, "model", finalResponse, BOT_NAME);
+                persistConversationTurns(channelId,
+                    { text: userInput, username, timestamp: currentTimestamp },
+                    { text: finalResponse, username: BOT_NAME, timestamp: Date.now() }
+                );
             }
 
             return finalResponse;

@@ -48,9 +48,29 @@ function logMessage(channelId, memberName, message, timestamp = Date.now()) {
     saveMemory();
 }
 
+function logMessagesBatch(channelId, messages) {
+    if (!memory[channelId]) memory[channelId] = [];
+
+    for (const msg of messages) {
+        memory[channelId].push({
+            memberName: msg.memberName,
+            message: msg.message,
+            timestamp: msg.timestamp || Date.now()
+        });
+    }
+
+    // keep only last 30
+    if (memory[channelId].length > 30) {
+        memory[channelId] = memory[channelId].slice(-30);
+    }
+
+    saveMemory();
+}
+
 module.exports = {
     loadMemory,
     saveMemory,
     logMessage,
+    logMessagesBatch,
     memory
 };
