@@ -32,23 +32,11 @@ function saveMemory() {
 // Add a logged message (while keeping only last 30)
 // Updated to include timestamp
 function logMessage(channelId, memberName, message, timestamp = Date.now()) {
-    if (!memory[channelId]) memory[channelId] = [];
-
-    memory[channelId].push({
-        memberName,
-        message,
-        timestamp // Store the time
-    });
-
-    // keep only last 30
-    if (memory[channelId].length > 30) {
-        memory[channelId] = memory[channelId].slice(-30);
-    }
-
-    saveMemory();
+    logMessagesBatch(channelId, [{ memberName, message, timestamp }]);
 }
 
 function logMessagesBatch(channelId, messages) {
+    if (!messages || messages.length === 0) return;
     if (!memory[channelId]) memory[channelId] = [];
 
     for (const msg of messages) {

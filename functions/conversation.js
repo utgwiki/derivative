@@ -32,16 +32,20 @@ function formatTime(timestamp) {
     return new Date(timestamp).toISOString();
 }
 
+function formatHistoryEntry(role, text, username = null, timestamp = Date.now()) {
+    const timeStr = formatTime(timestamp);
+    const prefix = username
+        ? `[${role}: ${username}] [Time: ${timeStr}]`
+        : `[${role}] [Time: ${timeStr}]`;
+    return `${prefix} ${text}`;
+}
+
 // 💡 Initialize chatHistories from the persistedMemory object loaded from disk
 for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     const geminiHistory = historyArray.map(log => {
         const role = log.memberName.toLowerCase() === `${BOT_NAME.toLowerCase()}` ? 'model' : 'user';
         const username = role === 'user' ? log.memberName : null;
-        const timeStr = formatTime(log.timestamp);
-        const prefix = username 
-            ? `[${role}: ${username}] [Time: ${timeStr}]`
-            : `[${role}] [Time: ${timeStr}]`;
-        const fullText = `${prefix} ${log.message}`;
+        const fullText = formatHistoryEntry(role, log.message, username, log.timestamp);
         return {
             role,
             parts: [{ text: fullText }]
@@ -54,11 +58,7 @@ function addToHistory(channelId, role, text, username = null, timestamp = Date.n
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
-    const timeStr = formatTime(timestamp);
-    const prefix = username
-        ? `[${role}: ${username}] [Time: ${timeStr}]`
-        : `[${role}] [Time: ${timeStr}]`;
-    const fullText = `${prefix} ${text}`;
+    const fullText = formatHistoryEntry(role, text, username, timestamp);
 
     history.push({
         role,
@@ -86,11 +86,7 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
 
     for (const turn of turns) {
         const { role, text, username, timestamp } = turn;
-        const timeStr = formatTime(timestamp);
-        const prefix = username
-            ? `[${role}: ${username}] [Time: ${timeStr}]`
-            : `[${role}] [Time: ${timeStr}]`;
-        const fullText = `${prefix} ${text}`;
+        const fullText = formatHistoryEntry(role, text, username, timestamp);
 
         history.push({
             role,
@@ -310,10 +306,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const query = searchMatch[1].trim();
                     console.log(`[Tool] Searching for: ${query}`);
                     const searchResults = await performSearch(query);
-                    currentMessageParts = [{
-                        role: "user",
-                        parts: [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }]
-                    }];
+                    currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
                     continue; 
                 }
 
@@ -328,10 +321,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
                         : `[SYSTEM] Page not found.`;
 
-                    currentMessageParts = [{
-                        role: "user",
-                        parts: [{ text: resultText }]
-                    }];
+                    currentMessageParts = [{ text: resultText }];
                     continue;
                 }
 
@@ -341,7 +331,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             }
 
             if (iterations >= MAX_ITERATIONS && !finalResponse) {
-                console.warn(`[Gemini] Loop exhausted at ${iterations} iterations for user: "${userInput.slice(0, 50)}...". Sending processing error.`);
+                const truncatedInput = userInput.length > 50 ? userInput.slice(0, 50) + "..." : userInput;
+                console.warn(`[Gemini] Loop exhausted at ${iterations} iterations for user: "${truncatedInput}". About to set processing error. Last response: ${finalResponse || 'empty'}`);
             }
 
             // Clean up internal thoughts
