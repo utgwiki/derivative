@@ -101,7 +101,7 @@ If none are relevant, return "NONE".`;
         const result = await gemini.models.generateContent({
             model: GEMINI_MODEL,
             contents: prompt,
-            maxOutputTokens: 100,
+            config: { maxOutputTokens: 100 },
         });
         const text = extractText(result);
         console.log(text);
@@ -171,10 +171,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
-                maxOutputTokens: 2500,
                 config: { 
                     systemInstruction: sysInstr,
                     tools: geminiTools, 
+                    maxOutputTokens: 2500,
                 },
                 history: chatHistories.get(channelId),
             });
@@ -199,7 +199,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 });
                 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
-                const parts = response.candidates?.[0]?.content?.parts || [];
+                const candidates = response.candidates || [];
+                if (candidates.length === 0) {
+                    console.warn("[Gemini] No candidates returned. Possible safety filter trigger.");
+                    finalResponse = MESSAGES.aiServiceError;
+                    break;
+                }
+
+                const parts = candidates[0]?.content?.parts || [];
                 const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
 
                 if (functionCalls.length > 0) {
@@ -208,8 +215,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     for (const call of functionCalls) {
                         const fnName = call.name;
                         const fnArgs = call.args;
+                        const fnId = call.id; // Extracting ID
                         
-                        console.log(`[Tool] Gemini calling function: ${fnName}`);
+                        console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
 
                         if (tools?.functions?.[fnName]) {
                             try {
@@ -218,6 +226,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                                 // 💡 This structure is what satisfies the "ContentUnion" requirement
                                 functionResponses.push({
                                     functionResponse: {
+                                        id: fnId, // Including ID
                                         name: fnName,
                                         response: fnResult 
                                     }
@@ -226,6 +235,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                                 console.error(`Function ${fnName} failed:`, fnErr);
                                 functionResponses.push({
                                     functionResponse: {
+                                        id: fnId, // Including ID
                                         name: fnName,
                                         response: { error: "Execution failed" }
                                     }
@@ -235,6 +245,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                             // 💡 FALLBACK: Always provide a response for every function call
                             functionResponses.push({
                                 functionResponse: {
+                                    id: fnId, // Including ID
                                     name: fnName,
                                     response: { error: "Function not found" }
                                 }
@@ -243,10 +254,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     }
 
                     // 💡 THE CRITICAL FIX: 
-                    // Wrap the parts in a Content object with the 'function' role.
+                    // Wrap the parts in a Content object with the 'tool' role.
                     // This is what prevents the ContentUnion error on the next sendMessage() call.
                     currentMessageParts = [{
-                        role: "function",
+                        role: "tool",
                         parts: functionResponses
                     }];
                     
@@ -256,8 +267,12 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 // 2. EXTRACT TEXT safely
                 let text = "";
                 try {
-                    // 💡 FIX: In @google/genai, .text is a getter, not a function.
-                    text = response.text || "";
+                    // 💡 Robust check for .text as a function or getter
+                    if (typeof response.text === 'function') {
+                        text = response.text() || "";
+                    } else {
+                        text = response.text || "";
+                    }
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
