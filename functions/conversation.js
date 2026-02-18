@@ -59,8 +59,8 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
     const history = chatHistories.get(channelId);
 
     const turns = [
-        { ...userTurn, role: "user" },
-        { ...modelTurn, role: "model" }
+        { role: "user", ...userTurn },
+        { role: "model", ...modelTurn }
     ];
 
     const logs = [];
