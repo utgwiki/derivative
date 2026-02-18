@@ -54,25 +54,6 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     chatHistories.set(channelId, geminiHistory);
 }
 
-function addToHistory(channelId, role, text, username = null, timestamp = Date.now()) {
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
-    const history = chatHistories.get(channelId);
-
-    const fullText = formatHistoryEntry(role, text, username, timestamp);
-
-    history.push({
-        role,
-        parts: [{ text: fullText }]
-    });
-
-    if (history.length > 30) {
-        history.splice(0, history.length - 30);
-    }
-
-    const nameForJson = username || role.toUpperCase();
-    logMessage(channelId, nameForJson, text, timestamp);
-}
-
 function persistConversationTurns(channelId, userTurn, modelTurn) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
@@ -290,11 +271,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 try {
                     // 💡 Read .text once to avoid double evaluation if it's a getter
                     textVal = response.text;
-                    if (typeof textVal === 'function') {
-                        text = textVal() || "";
-                    } else {
-                        text = textVal || "";
-                    }
+                    text = textVal || "";
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
@@ -345,7 +322,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             if (!finalResponse) return MESSAGES.processingError;
 
             // 💡 SYNC HISTORY: Persist both user and model turns together after success
-            if (finalResponse !== MESSAGES.aiServiceError && finalResponse !== MESSAGES.processingError) {
+            if (finalResponse !== MESSAGES.aiServiceError) {
                 const username = message?.author?.username || "User";
                 persistConversationTurns(channelId,
                     { text: userInput, username, timestamp: currentTimestamp },
