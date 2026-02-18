@@ -59,8 +59,8 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
     const history = chatHistories.get(channelId);
 
     const turns = [
-        { role: "user", ...userTurn },
-        { role: "model", ...modelTurn }
+        { ...userTurn, role: "user" },
+        { ...modelTurn, role: "model" }
     ];
 
     const logs = [];
@@ -309,7 +309,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             if (iterations >= MAX_ITERATIONS && !finalResponse) {
                 const truncatedInput = userInput.length > 50 ? userInput.slice(0, 50) + "..." : userInput;
-                console.warn(`[Gemini] Loop exhausted at ${iterations} iterations for user: "${truncatedInput}". About to set processing error. Last response: ${finalResponse || 'empty'}`);
+                console.warn(`[Gemini] Loop exhausted at ${MAX_ITERATIONS} iterations for user: "${truncatedInput}". Returning processing error.`);
             }
 
             // Clean up internal thoughts
