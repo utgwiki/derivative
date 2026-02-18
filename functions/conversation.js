@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
-const { loadMemory, logMessage, memory: persistedMemory } = require("../memory.js");
+const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
 const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js");
 
@@ -32,16 +32,20 @@ function formatTime(timestamp) {
     return new Date(timestamp).toISOString();
 }
 
+function formatHistoryEntry(role, text, username = null, timestamp = Date.now()) {
+    const timeStr = formatTime(timestamp);
+    const prefix = username
+        ? `[${role}: ${username}] [Time: ${timeStr}]`
+        : `[${role}] [Time: ${timeStr}]`;
+    return `${prefix} ${text}`;
+}
+
 // 💡 Initialize chatHistories from the persistedMemory object loaded from disk
 for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     const geminiHistory = historyArray.map(log => {
         const role = log.memberName.toLowerCase() === `${BOT_NAME.toLowerCase()}` ? 'model' : 'user';
         const username = role === 'user' ? log.memberName : null;
-        const timeStr = formatTime(log.timestamp);
-        const prefix = username 
-            ? `[${role}: ${username}] [Time: ${timeStr}]`
-            : `[${role}] [Time: ${timeStr}]`;
-        const fullText = `${prefix} ${log.message}`;
+        const fullText = formatHistoryEntry(role, log.message, username, log.timestamp);
         return {
             role,
             parts: [{ text: fullText }]
@@ -50,27 +54,38 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     chatHistories.set(channelId, geminiHistory);
 }
 
-function addToHistory(channelId, role, text, username = null, timestamp = Date.now()) {
+function persistConversationTurns(channelId, userTurn, modelTurn) {
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
-    const timeStr = formatTime(timestamp);
-    const prefix = username
-        ? `[${role}: ${username}] [Time: ${timeStr}]`
-        : `[${role}] [Time: ${timeStr}]`;
-    const fullText = `${prefix} ${text}`;
+    const turns = [
+        { ...userTurn, role: "user" },
+        { ...modelTurn, role: "model" }
+    ];
 
-    history.push({
-        role,
-        parts: [{ text: fullText }]
-    });
+    const logs = [];
+
+    for (const turn of turns) {
+        const { role, text, username, timestamp } = turn;
+        const fullText = formatHistoryEntry(role, text, username, timestamp);
+
+        history.push({
+            role,
+            parts: [{ text: fullText }]
+        });
+
+        logs.push({
+            memberName: username || role.toUpperCase(),
+            message: text,
+            timestamp: timestamp
+        });
+    }
 
     if (history.length > 30) {
         history.splice(0, history.length - 30);
     }
 
-    const nameForJson = username || role.toUpperCase();
-    logMessage(channelId, nameForJson, text, timestamp);
+    logMessagesBatch(channelId, logs);
 }
 
 // --- GEMINI FUNCTIONS ---
@@ -101,7 +116,7 @@ If none are relevant, return "NONE".`;
         const result = await gemini.models.generateContent({
             model: GEMINI_MODEL,
             contents: prompt,
-            maxOutputTokens: 100,
+            config: { maxOutputTokens: 100 },
         });
         const text = extractText(result);
         console.log(text);
@@ -171,10 +186,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
-                maxOutputTokens: 2500,
                 config: { 
                     systemInstruction: sysInstr,
                     tools: geminiTools, 
+                    maxOutputTokens: 2500,
                 },
                 history: chatHistories.get(channelId),
             });
@@ -191,15 +206,22 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                // 💡 FIX: The @google/genai SDK expects an object with a 'message' property.
+                // 💡 FIX: Pass PartUnion (string/Part/Part[]) instead of Content object.
                 const response = await chat.sendMessage({
-                    message: currentMessageParts[0]?.role
-                        ? currentMessageParts[0]
-                        : { role: "user", parts: currentMessageParts }
+                    message: currentMessageParts[0]?.role === "tool"
+                        ? currentMessageParts[0].parts
+                        : currentMessageParts
                 });
-                
+
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
-                const parts = response.candidates?.[0]?.content?.parts || [];
+                const candidates = response.candidates || [];
+                if (candidates.length === 0) {
+                    console.warn("[Gemini] No candidates returned. Possible safety filter trigger.");
+                    finalResponse = MESSAGES.aiServiceError;
+                    break;
+                }
+
+                const parts = candidates[0]?.content?.parts || [];
                 const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
 
                 if (functionCalls.length > 0) {
@@ -208,45 +230,35 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     for (const call of functionCalls) {
                         const fnName = call.name;
                         const fnArgs = call.args;
+                        const fnId = call.id; // Extracting ID
                         
-                        console.log(`[Tool] Gemini calling function: ${fnName}`);
+                        console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
+
+                        const createResponse = (res) => {
+                            const payload = { name: fnName, response: res };
+                            if (fnId) payload.id = fnId;
+                            return { functionResponse: payload };
+                        };
 
                         if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
-                                
-                                // 💡 This structure is what satisfies the "ContentUnion" requirement
-                                functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: fnResult 
-                                    }
-                                });
+                                functionResponses.push(createResponse(fnResult));
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
-                                functionResponses.push({
-                                    functionResponse: {
-                                        name: fnName,
-                                        response: { error: "Execution failed" }
-                                    }
-                                });
+                                functionResponses.push(createResponse({ error: "Execution failed" }));
                             }
                         } else {
                             // 💡 FALLBACK: Always provide a response for every function call
-                            functionResponses.push({
-                                functionResponse: {
-                                    name: fnName,
-                                    response: { error: "Function not found" }
-                                }
-                            });
+                            functionResponses.push(createResponse({ error: "Function not found" }));
                         }
                     }
 
                     // 💡 THE CRITICAL FIX: 
-                    // Wrap the parts in a Content object with the 'function' role.
+                    // Wrap the parts in a Content object with the 'tool' role.
                     // This is what prevents the ContentUnion error on the next sendMessage() call.
                     currentMessageParts = [{
-                        role: "function",
+                        role: "tool",
                         parts: functionResponses
                     }];
                     
@@ -255,9 +267,11 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
                 // 2. EXTRACT TEXT safely
                 let text = "";
+                let textVal;
                 try {
-                    // 💡 FIX: In @google/genai, .text is a getter, not a function.
-                    text = response.text || "";
+                    // 💡 Read .text once to avoid double evaluation if it's a getter
+                    textVal = response.text;
+                    text = textVal || "";
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
@@ -269,10 +283,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     const query = searchMatch[1].trim();
                     console.log(`[Tool] Searching for: ${query}`);
                     const searchResults = await performSearch(query);
-                    currentMessageParts = [{
-                        role: "user",
-                        parts: [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }]
-                    }];
+                    currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
                     continue; 
                 }
 
@@ -287,16 +298,18 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
                         : `[SYSTEM] Page not found.`;
 
-                    currentMessageParts = [{
-                        role: "user",
-                        parts: [{ text: resultText }]
-                    }];
+                    currentMessageParts = [{ text: resultText }];
                     continue;
                 }
 
                 // 4. Final Answer
                 finalResponse = text;
                 break;
+            }
+
+            if (iterations >= MAX_ITERATIONS && !finalResponse) {
+                const truncatedInput = userInput.length > 50 ? userInput.slice(0, 50) + "..." : userInput;
+                console.warn(`[Gemini] Loop exhausted at ${MAX_ITERATIONS} iterations for user: "${truncatedInput}". Returning processing error.`);
             }
 
             // Clean up internal thoughts
@@ -308,7 +321,15 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            addToHistory(channelId, "model", finalResponse, BOT_NAME);
+            // 💡 SYNC HISTORY: Persist both user and model turns together after success
+            if (finalResponse !== MESSAGES.aiServiceError) {
+                const username = message?.author?.username || "User";
+                persistConversationTurns(channelId,
+                    { text: userInput, username, timestamp: currentTimestamp },
+                    { text: finalResponse, username: BOT_NAME, timestamp: Date.now() }
+                );
+            }
+
             return finalResponse;
         });
     } catch (err) {
