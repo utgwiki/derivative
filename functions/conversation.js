@@ -198,12 +198,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         : { role: "user", parts: currentMessageParts }
                 });
 
-                // 💡 SYNC HISTORY: Add the user's initial turn to chatHistories after success
-                if (iterations === 1) {
-                    const username = message?.author?.username || "User";
-                    addToHistory(channelId, "user", userInput, username, currentTimestamp);
-                }
-                
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const candidates = response.candidates || [];
                 if (candidates.length === 0) {
@@ -322,6 +316,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 break;
             }
 
+            if (iterations >= MAX_ITERATIONS && !finalResponse) {
+                console.warn(`[Gemini] Loop exhausted at ${iterations} iterations for user: "${userInput.slice(0, 50)}...". Sending processing error.`);
+            }
+
             // Clean up internal thoughts
             finalResponse = finalResponse
                 .replace(/\[MW_SEARCH:.*?\]/g, "")
@@ -331,7 +329,13 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            addToHistory(channelId, "model", finalResponse, BOT_NAME);
+            // 💡 SYNC HISTORY: Persist both user and model turns together after success
+            if (finalResponse !== MESSAGES.aiServiceError && finalResponse !== MESSAGES.processingError) {
+                const username = message?.author?.username || "User";
+                addToHistory(channelId, "user", userInput, username, currentTimestamp);
+                addToHistory(channelId, "model", finalResponse, BOT_NAME);
+            }
+
             return finalResponse;
         });
     } catch (err) {
