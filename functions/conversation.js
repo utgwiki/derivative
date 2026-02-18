@@ -197,6 +197,12 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         ? currentMessageParts[0]
                         : { role: "user", parts: currentMessageParts }
                 });
+
+                // 💡 SYNC HISTORY: Add the user's initial turn to chatHistories after success
+                if (iterations === 1) {
+                    const username = message?.author?.username || "User";
+                    addToHistory(channelId, "user", userInput, username, currentTimestamp);
+                }
                 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
                 const candidates = response.candidates || [];
@@ -266,12 +272,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
                 // 2. EXTRACT TEXT safely
                 let text = "";
+                let textVal;
                 try {
-                    // 💡 Robust check for .text as a function or getter
-                    if (typeof response.text === 'function') {
-                        text = response.text() || "";
+                    // 💡 Read .text once to avoid double evaluation if it's a getter
+                    textVal = response.text;
+                    if (typeof textVal === 'function') {
+                        text = textVal() || "";
                     } else {
-                        text = response.text || "";
+                        text = textVal || "";
                     }
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
