@@ -29,17 +29,6 @@ const MESSAGES = {
 
 // --- MEMORY ---
 const chatHistories = new Map();
-const CHAT_HISTORY_LIMIT = 100;
-
-function enforceHistoryLimit(channelId) {
-    if (!chatHistories.has(channelId)) {
-        if (chatHistories.size >= CHAT_HISTORY_LIMIT) {
-            const firstKey = chatHistories.keys().next().value;
-            chatHistories.delete(firstKey);
-        }
-        chatHistories.set(channelId, []);
-    }
-}
 
 // Helper to format time for AI context
 function formatTime(timestamp) {
@@ -55,6 +44,14 @@ function formatHistoryEntry(role, text, username = null, timestamp = Date.now())
     return `${prefix} ${text}`;
 }
 
+function stripSystemMessages(text) {
+    if (!text) return "";
+    return text
+        .replace(/\[SYSTEM:[\s\S]*?\]/gi, "")
+        .replace(/\[System Note:[\s\S]*?\]/gi, "")
+        .trim();
+}
+
 // 💡 Initialize chatHistories from the persistedMemory object loaded from disk
 for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
     const geminiHistory = historyArray.map(log => {
@@ -66,19 +63,21 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
             parts: [{ text: fullText }]
         };
     });
-
-    enforceHistoryLimit(channelId);
     chatHistories.set(channelId, geminiHistory);
 }
 
 function persistConversationTurns(channelId, userTurn, modelTurn) {
-    enforceHistoryLimit(channelId);
+    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
-    const turns = [
-        { role: "user", ...userTurn },
-        { role: "model", ...modelTurn }
-    ];
+    const strippedUserText = stripSystemMessages(userTurn.text);
+    const strippedModelText = stripSystemMessages(modelTurn.text);
+
+    const turns = [];
+    if (strippedUserText) {
+        turns.push({ role: "user", ...userTurn, text: strippedUserText });
+    }
+    turns.push({ role: "model", ...modelTurn, text: strippedModelText });
 
     const logs = [];
 
@@ -102,7 +101,9 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
         history.splice(0, history.length - 30);
     }
 
-    logMessagesBatch(channelId, logs);
+    if (logs.length > 0) {
+        logMessagesBatch(channelId, logs);
+    }
 }
 
 // --- GEMINI FUNCTIONS ---
@@ -185,7 +186,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
     }
 
-    enforceHistoryLimit(channelId);
+    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
 
     try {
         return await runWithMainKeys(async (gemini) => {
@@ -334,6 +335,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 .replace(/\[MW_SEARCH:.*?\]/g, "")
                 .replace(/\[MW_CONTENT:.*?\]/g, "")
                 .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
+                .replace(/\[SYSTEM:[\s\S]*?\]/gi, "")
+                .replace(/\[System Note:[\s\S]*?\]/gi, "")
                 .trim();
 
             if (!finalResponse) return MESSAGES.processingError;
