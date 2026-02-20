@@ -7,14 +7,18 @@ const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js")
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-// Dynamic import for Gemini
+// Dynamic import for Gemini with caching
+const geminiClients = new Map();
 let GoogleGenAI;
 async function getGeminiClient(apiKey) {
+    if (geminiClients.has(apiKey)) return geminiClients.get(apiKey);
     if (!GoogleGenAI) {
         const mod = await import("@google/genai");
         GoogleGenAI = mod.GoogleGenAI;
     }
-    return new GoogleGenAI({ apiKey });
+    const client = new GoogleGenAI({ apiKey });
+    geminiClients.set(apiKey, client);
+    return client;
 }
 
 const MESSAGES = {
@@ -25,6 +29,17 @@ const MESSAGES = {
 
 // --- MEMORY ---
 const chatHistories = new Map();
+const CHAT_HISTORY_LIMIT = 100;
+
+function enforceHistoryLimit(channelId) {
+    if (!chatHistories.has(channelId)) {
+        if (chatHistories.size >= CHAT_HISTORY_LIMIT) {
+            const firstKey = chatHistories.keys().next().value;
+            chatHistories.delete(firstKey);
+        }
+        chatHistories.set(channelId, []);
+    }
+}
 
 // Helper to format time for AI context
 function formatTime(timestamp) {
@@ -51,11 +66,13 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
             parts: [{ text: fullText }]
         };
     });
+
+    enforceHistoryLimit(channelId);
     chatHistories.set(channelId, geminiHistory);
 }
 
 function persistConversationTurns(channelId, userTurn, modelTurn) {
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    enforceHistoryLimit(channelId);
     const history = chatHistories.get(channelId);
 
     const turns = [
@@ -168,7 +185,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
     }
 
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    enforceHistoryLimit(channelId);
 
     try {
         return await runWithMainKeys(async (gemini) => {

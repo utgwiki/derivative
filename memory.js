@@ -3,6 +3,8 @@ const path = "./messageMemory.json";
 
 // Initialize as a const object so the reference never changes
 const memory = {};
+let saveTimeout = null;
+const CHANNEL_LIMIT = 100;
 
 // Load existing memory
 function loadMemory() {
@@ -24,9 +26,18 @@ function loadMemory() {
     }
 }
 
-// Save memory back to file
-function saveMemory() {
-    fs.writeFileSync(path, JSON.stringify(memory, null, 2));
+// Save memory back to file with debouncing
+async function saveMemory() {
+    if (saveTimeout) clearTimeout(saveTimeout);
+
+    saveTimeout = setTimeout(async () => {
+        try {
+            await fs.promises.writeFile(path, JSON.stringify(memory, null, 2));
+            saveTimeout = null;
+        } catch (err) {
+            console.error("Error saving memory file:", err);
+        }
+    }, 5000); // 5 second debounce
 }
 
 // Add a logged message (while keeping only last 30)
@@ -37,7 +48,33 @@ function logMessage(channelId, memberName, message, timestamp = Date.now()) {
 
 function logMessagesBatch(channelId, messages) {
     if (!messages || messages.length === 0) return;
-    if (!memory[channelId]) memory[channelId] = [];
+
+    if (!memory[channelId]) {
+        // Enforce channel limit
+        const channelIds = Object.keys(memory);
+        if (channelIds.length >= CHANNEL_LIMIT) {
+            // Find oldest channel by last message timestamp
+            let oldestChannelId = null;
+            let oldestTimestamp = Infinity;
+
+            for (const id of channelIds) {
+                const history = memory[id];
+                const lastMsg = history[history.length - 1];
+                if (lastMsg && lastMsg.timestamp < oldestTimestamp) {
+                    oldestTimestamp = lastMsg.timestamp;
+                    oldestChannelId = id;
+                }
+            }
+
+            if (oldestChannelId) {
+                delete memory[oldestChannelId];
+            } else {
+                // Fallback to removing the first key if no timestamps are found
+                delete memory[channelIds[0]];
+            }
+        }
+        memory[channelId] = [];
+    }
 
     for (const msg of messages) {
         memory[channelId].push({
