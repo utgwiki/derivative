@@ -26,20 +26,21 @@ function loadMemory() {
 }
 
 // Save memory back to file with debouncing
-async function saveMemory() {
+function saveMemory() {
     if (saveTimeout) clearTimeout(saveTimeout);
 
     saveTimeout = setTimeout(async () => {
         try {
             await fs.promises.writeFile(path, JSON.stringify(memory, null, 2));
-            saveTimeout = null;
         } catch (err) {
             console.error("Error saving memory file:", err);
+        } finally {
+            saveTimeout = null;
         }
     }, 5000); // 5 second debounce
 }
 
-// Add a logged message (while keeping only last 30)
+// Add a logged message
 // Updated to include timestamp
 function logMessage(channelId, memberName, message, timestamp = Date.now()) {
     logMessagesBatch(channelId, [{ memberName, message, timestamp }]);
@@ -60,10 +61,7 @@ function logMessagesBatch(channelId, messages) {
         });
     }
 
-    // keep only last 30
-    if (memory[channelId].length > 30) {
-        memory[channelId] = memory[channelId].slice(-30);
-    }
+    // Removed hard 30-message cap as requested
 
     saveMemory();
 }

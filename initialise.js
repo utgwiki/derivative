@@ -469,7 +469,8 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 pageTitles.join(", ") || undefined,
                 imageParts,
                 messageOrInteraction,
-                tools
+                tools,
+                isProactive
             );
         } else {
             reply = explicitTemplateContent || "I don't know.";

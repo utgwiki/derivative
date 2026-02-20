@@ -7,18 +7,30 @@ const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js")
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-// Dynamic import for Gemini with caching
+// Dynamic import for Gemini with deduplicated initialization
 const geminiClients = new Map();
-let GoogleGenAI;
+let GoogleGenAIModule = null;
+
 async function getGeminiClient(apiKey) {
-    if (geminiClients.has(apiKey)) return geminiClients.get(apiKey);
-    if (!GoogleGenAI) {
-        const mod = await import("@google/genai");
-        GoogleGenAI = mod.GoogleGenAI;
+    if (geminiClients.has(apiKey)) return await geminiClients.get(apiKey);
+
+    const initPromise = (async () => {
+        if (!GoogleGenAIModule) {
+            const mod = await import("@google/genai");
+            GoogleGenAIModule = mod.GoogleGenAI;
+        }
+        return new GoogleGenAIModule({ apiKey });
+    })();
+
+    geminiClients.set(apiKey, initPromise);
+    try {
+        const client = await initPromise;
+        geminiClients.set(apiKey, Promise.resolve(client));
+        return client;
+    } catch (err) {
+        geminiClients.delete(apiKey);
+        throw err;
     }
-    const client = new GoogleGenAI({ apiKey });
-    geminiClients.set(apiKey, client);
-    return client;
 }
 
 const MESSAGES = {
@@ -29,6 +41,34 @@ const MESSAGES = {
 
 // --- MEMORY ---
 const chatHistories = new Map();
+const CHAT_HISTORY_LIMIT = 100;
+
+function enforceHistoryLimit(channelId) {
+    if (chatHistories.has(channelId)) return;
+
+    if (chatHistories.size >= CHAT_HISTORY_LIMIT) {
+        let oldestChannelId = null;
+        let oldestTimestamp = Infinity;
+
+        for (const [id, history] of chatHistories.entries()) {
+            const timestamp = history.lastMessageAt || 0;
+            if (timestamp < oldestTimestamp) {
+                oldestTimestamp = timestamp;
+                oldestChannelId = id;
+            }
+        }
+
+        if (oldestChannelId) {
+            chatHistories.delete(oldestChannelId);
+        } else {
+            const firstKey = chatHistories.keys().next().value;
+            chatHistories.delete(firstKey);
+        }
+    }
+    const newHistory = [];
+    newHistory.lastMessageAt = Date.now();
+    chatHistories.set(channelId, newHistory);
+}
 
 // Helper to format time for AI context
 function formatTime(timestamp) {
@@ -47,8 +87,8 @@ function formatHistoryEntry(role, text, username = null, timestamp = Date.now())
 function stripSystemMessages(text) {
     if (!text) return "";
     return text
-        .replace(/\[SYSTEM:[\s\S]*?\]/gi, "")
-        .replace(/\[System Note:[\s\S]*?\]/gi, "")
+        .replace(/\[SYSTEM:[^\]]*(?:\[[^\]]*\][^\]]*)*\]/gi, "")
+        .replace(/\[System Note:[^\]]*(?:\[[^\]]*\][^\]]*)*\]/gi, "")
         .trim();
 }
 
@@ -63,21 +103,38 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
             parts: [{ text: fullText }]
         };
     });
+    const lastMsg = historyArray[historyArray.length - 1];
+    geminiHistory.lastMessageAt = lastMsg ? lastMsg.timestamp : Date.now();
+
+    // Evict before setting if needed
+    if (!chatHistories.has(channelId) && chatHistories.size >= CHAT_HISTORY_LIMIT) {
+        let oldestChannelId = null;
+        let oldestTimestamp = Infinity;
+        for (const [id, h] of chatHistories.entries()) {
+            if ((h.lastMessageAt || 0) < oldestTimestamp) {
+                oldestTimestamp = h.lastMessageAt || 0;
+                oldestChannelId = id;
+            }
+        }
+        if (oldestChannelId) chatHistories.delete(oldestChannelId);
+    }
     chatHistories.set(channelId, geminiHistory);
 }
 
 function persistConversationTurns(channelId, userTurn, modelTurn) {
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    enforceHistoryLimit(channelId);
     const history = chatHistories.get(channelId);
 
     const strippedUserText = stripSystemMessages(userTurn.text);
     const strippedModelText = stripSystemMessages(modelTurn.text);
 
-    const turns = [];
-    if (strippedUserText) {
-        turns.push({ role: "user", ...userTurn, text: strippedUserText });
-    }
-    turns.push({ role: "model", ...modelTurn, text: strippedModelText });
+    // Ensure alternation: skip if user turn is empty
+    if (!strippedUserText) return;
+
+    const turns = [
+        { role: "user", ...userTurn, text: strippedUserText },
+        { role: "model", ...modelTurn, text: strippedModelText }
+    ];
 
     const logs = [];
 
@@ -95,10 +152,8 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
             message: text,
             timestamp: timestamp
         });
-    }
 
-    if (history.length > 30) {
-        history.splice(0, history.length - 30);
+        history.lastMessageAt = timestamp;
     }
 
     if (logs.length > 0) {
@@ -171,8 +226,8 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
-// 💡 UPDATED: Now accepts 'tools' parameter
-async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null, tools = null) {
+// 💡 UPDATED: Now accepts 'isProactive' parameter
+async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null, tools = null, isProactive = false) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
     const channelId = message?.channel?.id || "global";
@@ -186,7 +241,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
     }
 
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    enforceHistoryLimit(channelId);
 
     try {
         return await runWithMainKeys(async (gemini) => {
@@ -224,11 +279,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                // 💡 FIX: Pass PartUnion (string/Part/Part[]) instead of Content object.
+                // 💡 FIX: Pass entire currentMessageParts to retain roles.
                 const response = await chat.sendMessage({
-                    message: currentMessageParts[0]?.role === "tool"
-                        ? currentMessageParts[0].parts
-                        : currentMessageParts
+                    message: currentMessageParts
                 });
 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
@@ -272,9 +325,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         }
                     }
 
-                    // 💡 THE CRITICAL FIX: 
                     // Wrap the parts in a Content object with the 'tool' role.
-                    // This is what prevents the ContentUnion error on the next sendMessage() call.
                     currentMessageParts = [{
                         role: "tool",
                         parts: functionResponses
@@ -334,15 +385,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             finalResponse = finalResponse
                 .replace(/\[MW_SEARCH:.*?\]/g, "")
                 .replace(/\[MW_CONTENT:.*?\]/g, "")
-                .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "")
-                .replace(/\[SYSTEM:[\s\S]*?\]/gi, "")
-                .replace(/\[System Note:[\s\S]*?\]/gi, "")
-                .trim();
+                .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "");
+
+            finalResponse = stripSystemMessages(finalResponse);
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            // 💡 SYNC HISTORY: Persist both user and model turns together after success
-            if (finalResponse !== MESSAGES.aiServiceError) {
+            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive
+            if (finalResponse !== MESSAGES.aiServiceError && !isProactive) {
                 const username = message?.author?.username || "User";
                 persistConversationTurns(channelId,
                     { text: userInput, username, timestamp: currentTimestamp },
