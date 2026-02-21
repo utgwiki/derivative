@@ -41,34 +41,6 @@ const MESSAGES = {
 
 // --- MEMORY ---
 const chatHistories = new Map();
-const CHAT_HISTORY_LIMIT = 100;
-
-function enforceHistoryLimit(channelId) {
-    if (chatHistories.has(channelId)) return;
-
-    if (chatHistories.size >= CHAT_HISTORY_LIMIT) {
-        let oldestChannelId = null;
-        let oldestTimestamp = Infinity;
-
-        for (const [id, history] of chatHistories.entries()) {
-            const timestamp = history.lastMessageAt || 0;
-            if (timestamp < oldestTimestamp) {
-                oldestTimestamp = timestamp;
-                oldestChannelId = id;
-            }
-        }
-
-        if (oldestChannelId) {
-            chatHistories.delete(oldestChannelId);
-        } else {
-            const firstKey = chatHistories.keys().next().value;
-            chatHistories.delete(firstKey);
-        }
-    }
-    const newHistory = [];
-    newHistory.lastMessageAt = Date.now();
-    chatHistories.set(channelId, newHistory);
-}
 
 // Helper to format time for AI context
 function formatTime(timestamp) {
@@ -103,26 +75,11 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
             parts: [{ text: fullText }]
         };
     });
-    const lastMsg = historyArray[historyArray.length - 1];
-    geminiHistory.lastMessageAt = lastMsg ? lastMsg.timestamp : Date.now();
-
-    // Evict before setting if needed
-    if (!chatHistories.has(channelId) && chatHistories.size >= CHAT_HISTORY_LIMIT) {
-        let oldestChannelId = null;
-        let oldestTimestamp = Infinity;
-        for (const [id, h] of chatHistories.entries()) {
-            if ((h.lastMessageAt || 0) < oldestTimestamp) {
-                oldestTimestamp = h.lastMessageAt || 0;
-                oldestChannelId = id;
-            }
-        }
-        if (oldestChannelId) chatHistories.delete(oldestChannelId);
-    }
     chatHistories.set(channelId, geminiHistory);
 }
 
 function persistConversationTurns(channelId, userTurn, modelTurn) {
-    enforceHistoryLimit(channelId);
+    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
     const history = chatHistories.get(channelId);
 
     const strippedUserText = stripSystemMessages(userTurn.text);
@@ -152,8 +109,6 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
             message: text,
             timestamp: timestamp
         });
-
-        history.lastMessageAt = timestamp;
     }
 
     if (logs.length > 0) {
@@ -241,7 +196,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
         sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
     }
 
-    enforceHistoryLimit(channelId);
+    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
 
     try {
         return await runWithMainKeys(async (gemini) => {
