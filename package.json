@@ -16,7 +16,6 @@
         "discord.js": "^14.22.1",
         "dotenv": "^17.2.3",
         "express": "^5.1.0",
-        "express.js": "^1.0.0",
         "node-fetch": "^3.3.2"
     }
 }

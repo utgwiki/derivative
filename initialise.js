@@ -222,7 +222,10 @@ async function scheduleFollowUp(message) {
     if (activeConversations.has(channelId)) {
         clearTimeout(activeConversations.get(channelId).timer);
     }
-    if (Math.random() < 0.5) return; 
+    if (Math.random() < 0.5) {
+        activeConversations.delete(channelId);
+        return;
+    }
 
     const delay = Math.floor(Math.random() * (MAX_FOLLOWUP_DELAY - MIN_FOLLOWUP_DELAY + 1)) + MIN_FOLLOWUP_DELAY;
     
@@ -466,7 +469,8 @@ async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, is
                 pageTitles.join(", ") || undefined,
                 imageParts,
                 messageOrInteraction,
-                tools
+                tools,
+                isProactive
             );
         } else {
             reply = explicitTemplateContent || "I don't know.";
