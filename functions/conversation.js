@@ -279,12 +279,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                             functionResponses.push(createResponse({ error: "Function not found" }));
                         }
                     }
-
-                    // Wrap the parts in a Content object with the 'tool' role.
-                    currentMessageParts = [{
-                        role: "tool",
-                        parts: functionResponses
-                    }];
+                    
+                    currentMessageParts = functionResponses;
                     
                     continue; // Loop back to give Gemini the data
                 }
