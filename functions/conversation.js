@@ -86,7 +86,7 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
     const strippedModelText = stripSystemMessages(modelTurn.text);
 
     // Ensure alternation: skip if user turn is empty
-    if (!strippedUserText) return;
+    if (!strippedUserText || !strippedModelText) return;
 
     const turns = [
         { role: "user", ...userTurn, text: strippedUserText },
@@ -340,7 +340,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             finalResponse = finalResponse
                 .replace(/\[MW_SEARCH:.*?\]/g, "")
                 .replace(/\[MW_CONTENT:.*?\]/g, "")
-                .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]|\[HISTORY[^\]]*\]/gi, "");
+                .replace(/\[THOUGHT\][\s\S]*?(?:\[\/THOUGHT\]|$)|\[HISTORY[^\]]*\]/gi, "");
 
             finalResponse = stripSystemMessages(finalResponse);
 
