@@ -30,12 +30,11 @@ function saveMemory() {
     if (saveTimeout) clearTimeout(saveTimeout);
 
     saveTimeout = setTimeout(async () => {
+        saveTimeout = null; // clear synchronously before async I/O
         try {
             await fs.promises.writeFile(path, JSON.stringify(memory, null, 2));
         } catch (err) {
             console.error("Error saving memory file:", err);
-        } finally {
-            saveTimeout = null;
         }
     }, 5000); // 5 second debounce
 }
