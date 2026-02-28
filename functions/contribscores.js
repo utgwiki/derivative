@@ -1,6 +1,9 @@
 const { fetch } = require("./utils.js");
 
 async function getContributionScores(wikiConfig) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
     try {
         const params = new URLSearchParams({
             action: "parse",
@@ -11,7 +14,15 @@ async function getContributionScores(wikiConfig) {
         });
 
         const url = `${wikiConfig.apiEndpoint}?${params.toString()}`;
-        const res = await fetch(url, { headers: { "User-Agent": "DiscordBot/Derivative" } });
+        const res = await fetch(url, {
+            signal: controller.signal,
+            headers: { "User-Agent": "DiscordBot/Derivative" }
+        });
+
+        if (!res.ok) {
+            throw new Error(`Wiki API returned ${res.status}: ${res.statusText}`);
+        }
+
         const json = await res.json();
         const html = json.parse?.text?.["*"];
 
@@ -51,18 +62,19 @@ async function getContributionScores(wikiConfig) {
             dataSummary += `${i + 1}. <:playerpoint:1472433775593000961> \`${paddedScore}\`    ✏️ \`${paddedEdits}\`    **[@${data.user}](${wikiConfig.articlePath}User:${data.user})**\n`;
         });
 
-        if (!dataSummary) return {
-            title: "Special:ContributionScores",
-            result: "No content available."
-        };
-
         return {
             title: "Special:ContributionScores",
             result: dataSummary
         };
     } catch (err) {
+        if (err.name === 'AbortError') {
+            console.error("Leaderboard fetch timed out.");
+            return { error: "Failed to fetch leaderboard: Request timed out." };
+        }
         console.error("Error fetching leaderboard:", err);
-        return { error: "Failed to fetch leaderboard data." };
+        return { error: `Failed to fetch leaderboard data: ${err.message}` };
+    } finally {
+        clearTimeout(timeout);
     }
 }
 

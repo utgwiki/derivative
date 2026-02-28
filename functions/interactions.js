@@ -230,20 +230,23 @@ async function handleUserRequest(wikiConfig, rawPageName, messageOrInteraction, 
             }
         }
         if (isInteraction(messageOrInteraction)) {
+            if (messageOrInteraction.deferred) {
+                return messageOrInteraction.editReply(payload);
+            }
             if (messageOrInteraction.replied) {
                 return messageOrInteraction.followUp(payload);
             }
-            if (messageOrInteraction.deferred) {
-                if (payload.ephemeral) {
-                    return messageOrInteraction.followUp(payload);
-                }
-                return messageOrInteraction.editReply(payload);
+            return messageOrInteraction.reply(payload);
+        } else {
+            const sanitizedPayload = { ...payload };
+            delete sanitizedPayload.ephemeral;
+            delete sanitizedPayload.flags;
+
+            if (typeof messageOrInteraction.reply === 'function') {
+                return messageOrInteraction.reply(sanitizedPayload);
+            } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
+                return messageOrInteraction.channel.send(sanitizedPayload);
             }
-            return messageOrInteraction.reply(payload);
-        } else if (typeof messageOrInteraction.reply === 'function') {
-            return messageOrInteraction.reply(payload);
-        } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
-            return messageOrInteraction.channel.send(payload);
         }
     };
 
@@ -323,10 +326,10 @@ async function handleUserRequest(wikiConfig, rawPageName, messageOrInteraction, 
         console.error("Error handling request:", err);
         const errorMsg = { content: "An error occurred while processing your request.", ephemeral: true };
         if (isInteraction(messageOrInteraction)) {
-            if (messageOrInteraction.replied) {
-                await messageOrInteraction.followUp(errorMsg).catch(() => {});
-            } else if (messageOrInteraction.deferred) {
+            if (messageOrInteraction.deferred) {
                 await messageOrInteraction.editReply(errorMsg).catch(() => {});
+            } else if (messageOrInteraction.replied) {
+                await messageOrInteraction.followUp(errorMsg).catch(() => {});
             } else {
                 await messageOrInteraction.reply(errorMsg).catch(() => {});
             }
@@ -363,7 +366,7 @@ async function handleInteraction(interaction) {
         if (interaction.commandName !== `Ask ${BOT_NAME}...`) return;
 
         const modal = new ModalBuilder()
-            .setCustomId("deriv_modal")
+            .setCustomId(`deriv_modal_${interaction.targetMessage.id}`)
             .setTitle(`Ask ${BOT_NAME}`);
 
         const textInput = new TextInputBuilder()
@@ -377,7 +380,6 @@ async function handleInteraction(interaction) {
         modal.addComponents(row);
 
         await interaction.showModal(modal);
-        interaction.client._selectedMessage = interaction.targetMessage;
         return;
     }
 

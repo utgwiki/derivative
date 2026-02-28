@@ -39,17 +39,22 @@ const {
 const activeConversations = new Map();
 
 // -------------------- UTILITIES --------------------
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const PREFIX_WIKI_MAP = Object.keys(WIKIS).reduce((acc, key) => {
     const prefix = WIKIS[key].prefix;
     if (prefix) acc[prefix] = key;
     return acc;
 }, {});
 
-const prefixPattern = Object.values(WIKIS).map(w => w.prefix).join('|');
+const prefixPattern = Object.values(WIKIS).map(w => escapeRegExp(w.prefix)).join('|');
 
 const syntaxRegex = new RegExp(
     `\\{\\{(?:(${prefixPattern}):)?([^{}|]+)(?:\\|[^{}]*)?\\}\\}|` +
-    `\\[\\[(?:(${prefixPattern}):)?([^\\]|]+)(?:\\|[^[\\]]*)?\\]\\]`
+    `\\[\\[(?:(${prefixPattern}):)?([^\\]|]+)(?:\\|[^[\\]]*)?\\]\\]`,
+    'i'
 );
 
 // -------------------- CLIENT SETUP --------------------
@@ -67,7 +72,6 @@ const client = new Client({
 
 client.once("ready", async () => {
     console.log(`Logged in as ${client.user.tag}`);
-    // Load pages for AI context
     const { loadPages } = require("./functions/parse_page.js");
     await loadPages();
 
@@ -91,7 +95,7 @@ client.once("ready", async () => {
 });
 
 // -------------------- FOLLOW-UP --------------------
-async function scheduleFollowUp(message) {
+async function scheduleFollowUp(message, wikiConfig) {
     const channelId = message.channel.id;
     if (activeConversations.has(channelId)) {
         clearTimeout(activeConversations.get(channelId).timer);
@@ -130,7 +134,7 @@ async function scheduleFollowUp(message) {
                 createdTimestamp: Date.now()
             };
 
-            await handleAIRequest(systemNote, systemNote, mockMessage, false, true);
+            await handleAIRequest(systemNote, systemNote, mockMessage, wikiConfig, false, true);
 
         } catch (err) {
             console.error("Follow-up execution failed:", err);
@@ -150,7 +154,7 @@ function getWikiAndPage(messageContent, channelParentId) {
     const match = messageContent.match(syntaxRegex);
     if (!match) return null;
 
-    const prefix = match[1] || match[3];
+    const prefix = (match[1] || match[3])?.toLowerCase();
     const rawPageName = (match[2] || match[4]).trim();
 
     let wikiConfig = null;
@@ -179,6 +183,10 @@ client.on("messageCreate", async (message) => {
         message.createdTimestamp 
     );
 
+    const wikiKey = CATEGORY_WIKI_MAP[message.channel.parentId] || "tagging";
+    const defaultWikiConfig = WIKIS[wikiKey];
+
+    let wikiHandled = false;
     const res = getWikiAndPage(message.content, message.channel.parentId);
     if (res) {
         const { wikiConfig, rawPageName } = res;
@@ -189,7 +197,7 @@ client.on("messageCreate", async (message) => {
                 botToAuthorMap.set(response.id, message.author.id);
                 pruneMap(responseMap);
                 pruneMap(botToAuthorMap);
-                return; // Prioritize wiki links over AI
+                wikiHandled = true;
             }
         }
     }
@@ -221,6 +229,8 @@ client.on("messageCreate", async (message) => {
 
     if (!(isDM || mentioned || isReply || keywordTriggered)) return;
 
+    if (wikiHandled) await new Promise(r => setTimeout(r, 1000));
+
     if (message.reference) {
         try {
             const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
@@ -251,10 +261,10 @@ client.on("messageCreate", async (message) => {
         }
     }
 
-    await handleAIRequest(promptMsg, rawUserMsg, message);
+    await handleAIRequest(promptMsg, rawUserMsg, message, defaultWikiConfig);
 
     if (isDM || mentioned || isReply) {
-        scheduleFollowUp(message);
+        scheduleFollowUp(message, defaultWikiConfig);
     }
 });
 
@@ -312,7 +322,8 @@ client.on("messageReactionAdd", async (reaction, user) => {
     }
 
     const emoji = reaction.emoji.name;
-    if (emoji === "🗑️" || emoji === "wastebucket" || emoji === "wastebasket") {
+    const valid = new Set(["🗑️", "wastebasket"]);
+    if (valid.has(emoji)) {
         const message = reaction.message;
         if (message.author.id !== client.user.id) return;
 
@@ -340,12 +351,17 @@ client.on("messageReactionAdd", async (reaction, user) => {
 
 async function handleInteraction(interaction) {
     if (interaction.isModalSubmit()) {
-        if (interaction.customId !== "deriv_modal") return;
+        const modalId = interaction.customId;
+        if (!modalId.startsWith("deriv_modal_")) return;
 
+        const targetMessageId = modalId.replace("deriv_modal_", "");
         let question = interaction.fields.getTextInputValue("user_question");
-        const message = interaction.client._selectedMessage;
 
-        if (!message) {
+        // Remove reliance on global client._selectedMessage
+        let message;
+        try {
+            message = await interaction.channel.messages.fetch(targetMessageId);
+        } catch (err) {
             return interaction.reply({ content: "Could not find the original message.", ephemeral: true });
         }
 
@@ -365,8 +381,11 @@ async function handleInteraction(interaction) {
         const isPrivateChannel = interaction.channel && (interaction.channel.type === ChannelType.DM || interaction.channel.type === ChannelType.GroupDM);
         const ephemeralSetting = !isPrivateChannel;
 
+        const wikiKey = CATEGORY_WIKI_MAP[interaction.channel.parentId] || "tagging";
+        const defaultWikiConfig = WIKIS[wikiKey];
+
         await interaction.deferReply({ ephemeral: ephemeralSetting });
-        await handleAIRequest(userPrompt, userPrompt, interaction, true);
+        await handleAIRequest(userPrompt, userPrompt, interaction, defaultWikiConfig, ephemeralSetting);
         return;
     }
 

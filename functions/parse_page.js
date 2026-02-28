@@ -1,8 +1,6 @@
 const { fetch } = require("./utils.js");
 const cheerio = require('cheerio');
 
-const { WIKIS } = require("../config.js");
-
 let knownPages = [];
 let pageLookup = new Map();
 
@@ -100,7 +98,6 @@ function htmlToMarkdown(html, baseUrl) {
 
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n/g, '\n\n');
-    text = text.replace(/ +/g, ' ');
 
     return text.trim();
 }
@@ -198,11 +195,12 @@ async function getPageData(pageTitle, wikiConfig) {
 }
 
 async function getSectionIndex(pageTitle, sectionName, wikiConfig) {
+    const canonical = await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
         prop: "sections",
-        page: pageTitle
+        page: canonical
     });
 
     try {
@@ -311,8 +309,72 @@ async function performSearch(query, wikiConfig) {
     }
 }
 
-// Keeping these empty or simple for now as they seem to be for the Gemini loop which might need more refactoring
-async function loadPages() {}
+async function getAllNamespaces(wikiConfig) {
+    try {
+        const params = new URLSearchParams({
+            action: "query",
+            meta: "siteinfo",
+            siprop: "namespaces",
+            format: "json"
+        });
+        const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+            headers: { "User-Agent": "DiscordBot/Derivative" }
+        });
+        const json = await res.json();
+        const nsObj = json.query?.namespaces || {};
+        return Object.entries(nsObj)
+            .map(([k, v]) => parseInt(k, 10))
+            .filter(id => id >= 0 && id % 2 === 0); // simplified main namespaces
+    } catch (err) {
+        return [0, 4];
+    }
+}
+
+async function getAllPages(wikiConfig) {
+    const pages = [];
+    try {
+        const namespaces = await getAllNamespaces(wikiConfig);
+        for (const ns of namespaces) {
+            let apcontinue = null;
+            do {
+                const params = new URLSearchParams({
+                    action: "query",
+                    format: "json",
+                    list: "allpages",
+                    aplimit: "max",
+                    apfilterredir: "nonredirects",
+                    apnamespace: String(ns),
+                });
+                if (apcontinue) params.append("apcontinue", apcontinue);
+
+                const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+                    headers: { "User-Agent": "DiscordBot/Derivative" }
+                });
+                const json = await res.json();
+                if (json?.query?.allpages?.length) {
+                    pages.push(...json.query.allpages.map(p => p.title));
+                }
+                apcontinue = json.continue?.apcontinue || null;
+            } while (apcontinue);
+        }
+    } catch (err) {}
+    return [...new Set(pages)];
+}
+
+async function loadPages() {
+    try {
+        const { WIKIS } = require("../config.js");
+        const newPages = await getAllPages(WIKIS.tagging);
+        knownPages.length = 0;
+        knownPages.push(...newPages);
+
+        pageLookup = new Map();
+        for (const title of knownPages) {
+            pageLookup.set(title.toLowerCase(), title);
+        }
+    } catch (err) {}
+}
+
 async function getWikiContent(pageTitle, wikiConfig) {
     const params = new URLSearchParams({
         action: "parse",
@@ -323,10 +385,7 @@ async function getWikiContent(pageTitle, wikiConfig) {
 
     try {
         const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
-            headers: {
-                "User-Agent": "DiscordBot/Derivative",
-                "Origin": wikiConfig.baseUrl,
-            },
+            headers: { "User-Agent": "DiscordBot/Derivative" },
         });
 
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
