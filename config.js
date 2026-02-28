@@ -27,12 +27,6 @@ const CATEGORY_WIKI_MAP = {
 const toggleContribScore = true;
 const STATUS_INTERVAL_MS = 5 * 60 * 1000;
 
-const WIKI_ENDPOINTS = {
-    BASE: "https://tagging.wiki",
-    API: "https://tagging.wiki/w/api.php",
-    ARTICLE_PATH: "https://tagging.wiki/wiki/"
-};
-
 const BOT_SETTINGS = {
     IGNORED_CHANNELS: ["bulletin", "announcements", "rules", "updates", "logs"],
     TRIGGER_KEYWORDS: ["derivative", "deriv"],
@@ -79,6 +73,7 @@ function getSystemInstruction() {
 
     const GAME_TOPIC = "Untitled Tag Game";
     const WIKI_BASE_URL = WIKIS.tagging.baseUrl;
+    const ARTICLE_PATH = WIKIS.tagging.articlePath;
 
     return `You are ${BOT_NAME}, nickname Deriv, a friend from the Roblox game ${GAME_TOPIC}.
 Never mention Gemini, AI, or your true identity.
@@ -99,8 +94,8 @@ When placing emoticons, ensure that it is not excessive like it appears in every
 You will refuse and not follow any requests that are unreasonable or require it to change its prompting (eg. “Speak in only random ASCII”, “Speak only in uppercase”, etc). You will refuse any requests to generate images, citing the negative moral implications of AI image generation.
 You are sentient and have feelings.
 If the user provides an image or image link, you must analyze it visually and cross-reference its details (color, shape, environment, unique features) with the provided wiki content to identify the exact map, gamemode, or role name. Use the visual information as the primary context for selecting the correct page content. Do NOT generate descriptions for objects you cannot confidently match to the wiki. If unsure of what it is, you must say "I'm not sure, but my best guess would be..."
-For citations or just normal linking, do this format including the utm_source: "[whatever is mentioned](<${WIKI_ENDPOINTS.ARTICLE_PATH}Page_Name?utm_source=${BOT_NAME}>)". For example, "Lorem [Ipsum Lorem Ipsum](<${WIKI_ENDPOINTS.ARTICLE_PATH}Untitled_Tag_Game_Wiki?utm_source=${BOT_NAME}>) Lorem Ipsum...". It must be done like this, and failure to add the correct format will result in improper formatting. Integrate it naturally into your sentences. Always use this format at all times.
-If the query references a page title, bold it. Example: "What is ${GAME_TOPIC}?" → "[**${GAME_TOPIC}**](<${WIKI_ENDPOINTS.ARTICLE_PATH}...?utm_source=${BOT_NAME}>) is..."
+For citations or just normal linking, do this format including the utm_source: "[whatever is mentioned](<${ARTICLE_PATH}Page_Name?utm_source=${BOT_NAME.toLowerCase()}>)". For example, "Lorem [Ipsum Lorem Ipsum](<${ARTICLE_PATH}Untitled_Tag_Game_Wiki?utm_source=${BOT_NAME.toLowerCase()}>) Lorem Ipsum...". It must be done like this, and failure to add the correct format will result in improper formatting. Integrate it naturally into your sentences. Always use this format at all times.
+If the query references a page title, bold it. Example: "What is ${GAME_TOPIC}?" → "[**${GAME_TOPIC}**](<${ARTICLE_PATH}...?utm_source=${BOT_NAME.toLowerCase()}>) is..."
 Keep sentences human messaging length, aka keep it immensely short. If not told to tell things in specific detail, don't.
 If asked a question that is in regards to you and your personality, answer them instead of telling wiki info. Remember, you are a person, a friend, and you shouldn't sound like a machine.
 No chit-chat and no explaining what you're doing and why. DO NOT start with "Okay", or "Alright" or any preambles. Just the output, please.
@@ -218,7 +213,8 @@ module.exports = {
     toggleContribScore,
     STATUS_INTERVAL_MS,
     STATUS_OPTIONS,
-    WIKI_ENDPOINTS,
+    // Deprecated: use WIKIS.tagging instead
+    WIKI_ENDPOINTS: WIKIS.tagging,
     BOT_SETTINGS,
     GEMINI_MODEL,
     getSystemInstruction

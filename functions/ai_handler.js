@@ -97,7 +97,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         message = messageOrInteraction.targetMessage;
     }
 
-    // Attempt to resolve message from customId if it's a modal submit and wasn't provided
     if (!message && messageOrInteraction.isModalSubmit && messageOrInteraction.customId?.startsWith("deriv_modal_")) {
         const targetMessageId = messageOrInteraction.customId.replace("deriv_modal_", "");
         try {
@@ -127,8 +126,13 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
         const urlRegex = /(https?:\/\/[^\s]+)/gi;
         const matches = [...rawUserMsg.matchAll(urlRegex)];
+        const imageExtRegex = /\.(jpe?g|png|gif|webp|svg)(\?.*)?$/i;
+
         for (const match of matches) {
-            imageURLs.push(match[0]);
+            const url = match[0];
+            if (imageExtRegex.test(url)) {
+                imageURLs.push(url);
+            }
         }
 
         const uniqueImageURLs = [...new Set(imageURLs)].slice(0, 5);
@@ -316,7 +320,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 }
             } catch (v2err) {
                 console.warn("Components V2 attempt failed — falling back to plain text.", v2err);
-                // No return here, allow fallback
             }
         }
 

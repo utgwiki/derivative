@@ -92,7 +92,10 @@ async function handleContribScoresRequest(interaction, { toggleContribScore, WIK
     }
 
     try {
-        await interaction.deferReply();
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply();
+        }
+
         const result = await getContributionScores(wikiConfig);
 
         if (result.error) {

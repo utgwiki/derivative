@@ -154,7 +154,7 @@ async function findCanonicalTitle(input, wikiConfig) {
             return topResult.title;
         }
     } catch (err) {
-        console.warn("findCanonicalTitle lookup failed:", err?.message || err);
+        console.warn(`findCanonicalTitle lookup failed for wiki ${wikiConfig.name}:`, err?.message || err);
     }
 
     return null;
@@ -189,7 +189,7 @@ async function getPageData(pageTitle, wikiConfig) {
             imageUrl: getFullSizeImageUrl(page.thumbnail?.source)
         };
     } catch (err) {
-        console.error(`Failed to fetch page data for "${pageTitle}":`, err.message);
+        console.error(`Failed to fetch page data for "${pageTitle}" on ${wikiConfig.name}:`, err.message);
         return null;
     }
 }
@@ -224,7 +224,7 @@ async function getSectionIndex(pageTitle, sectionName, wikiConfig) {
             line: match.line.replace(/<[^>]*>?/gm, "")
         };
     } catch (err) {
-        console.error(`Failed to fetch section index for "${sectionName}" in "${pageTitle}":`, err.message);
+        console.error(`Failed to fetch section index for "${sectionName}" in "${pageTitle}" on ${wikiConfig.name}:`, err.message);
         return null;
     }
 }
@@ -277,7 +277,7 @@ async function getSectionContent(pageTitle, sectionName, wikiConfig) {
             gallery: galleryItems.length > 0 ? galleryItems : null
         };
     } catch (err) {
-        console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}":`, err.message);
+        console.error(`Failed to fetch section content for "${pageTitle}#${sectionName}" on ${wikiConfig.name}:`, err.message);
         return null;
     }
 }
@@ -304,7 +304,7 @@ async function performSearch(query, wikiConfig) {
         if (results.length === 0) return "No results found.";
         return results.map(r => r.title).join(", ");
     } catch (err) {
-        console.error("Search API error:", err);
+        console.error(`Search API error for ${wikiConfig.name}:`, err);
         return "Error searching wiki.";
     }
 }
@@ -324,8 +324,9 @@ async function getAllNamespaces(wikiConfig) {
         const nsObj = json.query?.namespaces || {};
         return Object.entries(nsObj)
             .map(([k, v]) => parseInt(k, 10))
-            .filter(id => id >= 0 && id % 2 === 0); // simplified main namespaces
+            .filter(id => id >= 0 && id % 2 === 0);
     } catch (err) {
+        console.error(`Failed to fetch namespaces for ${wikiConfig.name}:`, err.message);
         return [0, 4];
     }
 }
@@ -350,6 +351,7 @@ async function getAllPages(wikiConfig) {
                 const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
                     headers: { "User-Agent": "DiscordBot/Derivative" }
                 });
+                if (!res.ok) throw new Error(`Wiki API returned ${res.status}`);
                 const json = await res.json();
                 if (json?.query?.allpages?.length) {
                     pages.push(...json.query.allpages.map(p => p.title));
@@ -357,22 +359,30 @@ async function getAllPages(wikiConfig) {
                 apcontinue = json.continue?.apcontinue || null;
             } while (apcontinue);
         }
-    } catch (err) {}
+    } catch (err) {
+        console.error(`Error in getAllPages for ${wikiConfig.name}:`, err.message);
+    }
     return [...new Set(pages)];
 }
 
 async function loadPages() {
     try {
         const { WIKIS } = require("../config.js");
-        const newPages = await getAllPages(WIKIS.tagging);
         knownPages.length = 0;
-        knownPages.push(...newPages);
-
         pageLookup = new Map();
-        for (const title of knownPages) {
-            pageLookup.set(title.toLowerCase(), title);
+
+        for (const wikiKey in WIKIS) {
+            const wikiConfig = WIKIS[wikiKey];
+            const newPages = await getAllPages(wikiConfig);
+            knownPages.push(...newPages);
+            for (const title of newPages) {
+                pageLookup.set(title.toLowerCase(), title);
+            }
+            console.log(`Loaded ${newPages.length} pages from ${wikiConfig.name}`);
         }
-    } catch (err) {}
+    } catch (err) {
+        console.error("loadPages failed:", err.message);
+    }
 }
 
 async function getWikiContent(pageTitle, wikiConfig) {
@@ -385,7 +395,9 @@ async function getWikiContent(pageTitle, wikiConfig) {
 
     try {
         const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Derivative" },
+            headers: {
+                "User-Agent": "DiscordBot/Derivative"
+            },
         });
 
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -396,7 +408,7 @@ async function getWikiContent(pageTitle, wikiConfig) {
         }
         return null;
     } catch (err) {
-        console.error(`Failed to fetch content for "${pageTitle}":`, err.message);
+        console.error(`Failed to fetch content for "${pageTitle}" on ${wikiConfig.name}:`, err.message);
         return null;
     }
 }

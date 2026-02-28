@@ -160,13 +160,13 @@ function buildPageEmbed(title, content, imageUrl, wikiConfig, gallery = null) {
 
         if (hasGallery) {
             const mediaGallery = new MediaGalleryBuilder();
-            gallery.slice(0, 10).forEach(item => {
+            for (const item of gallery.slice(0, 10)) {
                 const galleryItem = new MediaGalleryItemBuilder().setURL(item.url);
                 if (item.caption) {
                     galleryItem.setDescription(item.caption.slice(0, 1000));
                 }
                 mediaGallery.addItems(galleryItem);
-            });
+            }
             container.addMediaGalleryComponents(mediaGallery);
         }
     }
