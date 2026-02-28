@@ -208,7 +208,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (skipGemini) {
             if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
         } else {
-            pageTitles = await askGeminiForPages(rawUserMsg);
+            pageTitles = await askGeminiForPages(rawUserMsg, wikiConfig);
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
                     const content = await getWikiContent(pageTitle, wikiConfig);
@@ -222,6 +222,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             functions: {
                 "getContributionScores": async () => {
                     const result = await getContributionScores(wikiConfig);
+                    if (result.error) return { error: result.error };
                     return { result: result.result };
                 }
             }

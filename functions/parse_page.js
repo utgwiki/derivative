@@ -1,10 +1,29 @@
 const { fetch } = require("./utils.js");
 const cheerio = require('cheerio');
 
+let knownPagesByWiki = new Map();
+let pageLookupByWiki = new Map();
+
+// Backward compatibility symbols (keeping for now to avoid breaking existing imports)
 let knownPages = [];
-let pageLookup = new Map();
 
 // --- UTILITIES ---
+async function fetchWithTimeout(url, options = {}, timeout = 5000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+    } catch (error) {
+        clearTimeout(id);
+        throw error;
+    }
+}
+
 function getFullSizeImageUrl(url) {
     if (!url || !url.includes('/thumb/')) return url;
     try {
@@ -106,6 +125,12 @@ function htmlToMarkdown(html, baseUrl) {
 async function findCanonicalTitle(input, wikiConfig) {
     if (!input) return null;
     const raw = String(input).trim();
+    const wikiKey = Object.keys(require("../config.js").WIKIS).find(k => require("../config.js").WIKIS[k].baseUrl === wikiConfig.baseUrl);
+
+    if (wikiKey && pageLookupByWiki.has(wikiKey)) {
+        const lookup = pageLookupByWiki.get(wikiKey);
+        if (lookup.has(raw.toLowerCase())) return lookup.get(raw.toLowerCase());
+    }
 
     try {
         const directParams = new URLSearchParams({
@@ -116,7 +141,7 @@ async function findCanonicalTitle(input, wikiConfig) {
             indexpageids: "1"
         });
 
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${directParams.toString()}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${directParams.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -144,7 +169,7 @@ async function findCanonicalTitle(input, wikiConfig) {
             format: "json"
         });
 
-        const searchRes = await fetch(`${wikiConfig.apiEndpoint}?${searchParams.toString()}`, {
+        const searchRes = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${searchParams.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         const searchJson = await searchRes.json();
@@ -154,7 +179,11 @@ async function findCanonicalTitle(input, wikiConfig) {
             return topResult.title;
         }
     } catch (err) {
-        console.warn(`findCanonicalTitle lookup failed for wiki ${wikiConfig.name}:`, err?.message || err);
+        if (err.name === 'AbortError') {
+            console.warn(`findCanonicalTitle timed out for wiki ${wikiConfig.name}`);
+        } else {
+            console.warn(`findCanonicalTitle lookup failed for wiki ${wikiConfig.name}:`, err?.message || err);
+        }
     }
 
     return null;
@@ -177,9 +206,10 @@ async function getPageData(pageTitle, wikiConfig) {
     });
 
     try {
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const pages = json.query?.pages;
         if (!pages) return null;
@@ -208,7 +238,7 @@ async function getSectionIndex(pageTitle, sectionName, wikiConfig) {
     });
 
     try {
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${params}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -249,9 +279,10 @@ async function getSectionContent(pageTitle, sectionName, wikiConfig) {
     });
 
     try {
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${params}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
 
         const html = json.parse?.text?.["*"];
@@ -303,9 +334,10 @@ async function performSearch(query, wikiConfig) {
     });
 
     try {
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const results = json.query?.search || [];
         if (results.length === 0) return "No results found.";
@@ -324,9 +356,10 @@ async function getAllNamespaces(wikiConfig) {
             siprop: "namespaces",
             format: "json"
         });
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
             headers: { "User-Agent": "DiscordBot/Derivative" }
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const nsObj = json.query?.namespaces || {};
         return Object.entries(nsObj)
@@ -355,7 +388,7 @@ async function getAllPages(wikiConfig) {
                 });
                 if (apcontinue) params.append("apcontinue", apcontinue);
 
-                const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+                const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
                     headers: { "User-Agent": "DiscordBot/Derivative" }
                 });
                 if (!res.ok) throw new Error(`Wiki API returned ${res.status}`);
@@ -375,16 +408,21 @@ async function getAllPages(wikiConfig) {
 async function loadPages() {
     try {
         const { WIKIS } = require("../config.js");
+        knownPagesByWiki.clear();
+        pageLookupByWiki.clear();
         knownPages.length = 0;
-        pageLookup = new Map();
 
         for (const wikiKey in WIKIS) {
             const wikiConfig = WIKIS[wikiKey];
             const newPages = await getAllPages(wikiConfig);
+            knownPagesByWiki.set(wikiKey, newPages);
             knownPages.push(...newPages);
+
+            const lookup = new Map();
             for (const title of newPages) {
-                pageLookup.set(title.toLowerCase(), title);
+                lookup.set(title.toLowerCase(), title);
             }
+            pageLookupByWiki.set(wikiKey, lookup);
             console.log(`Loaded ${newPages.length} pages from ${wikiConfig.name}`);
         }
     } catch (err) {
@@ -402,7 +440,7 @@ async function getWikiContent(pageTitle, wikiConfig) {
     });
 
     try {
-        const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
+        const res = await fetchWithTimeout(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
             headers: {
                 "User-Agent": "DiscordBot/Derivative"
             },
@@ -430,5 +468,7 @@ module.exports = {
     getFullSizeImageUrl,
     loadPages,
     getWikiContent,
-    knownPages
+    knownPages,
+    knownPagesByWiki,
+    pageLookupByWiki
 };

@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
-const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
+const { performSearch, getWikiContent, findCanonicalTitle, knownPagesByWiki } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL, WIKIS, CATEGORY_WIKI_MAP } = require("../config.js");
 
 // node-fetch
@@ -132,10 +132,15 @@ function extractText(result) {
 }
 
 // Page selection Gemini (uses GEMINI_PAGE_KEY)
-async function askGeminiForPages(userInput) {
+async function askGeminiForPages(userInput, wikiConfig) {
     const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
+
+    // Resolve per-wiki page list if available
+    const wikiKey = Object.keys(WIKIS).find(k => WIKIS[k].baseUrl === wikiConfig.baseUrl) || "tagging";
+    const wikiPages = knownPagesByWiki.get(wikiKey) || [];
+
     const prompt = `User asked: "${userInput}"
-From this wiki page list: ${knownPages.join(", ")}
+From this wiki page list: ${wikiPages.join(", ")}
 Pick up to at least 5 relevant page titles that best match the request. 
 Return only the exact page titles, one per line.
 If none are relevant, return "NONE".`;
@@ -191,7 +196,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     // Resolve wiki configuration for instructions
     const parentId = message?.channel?.parentId || null;
-    const wikiKey = CATEGORY_WIKI_MAP[parentId] || "tagging";
+    let wikiKey = CATEGORY_WIKI_MAP[parentId] || "tagging";
+    if (!WIKIS[wikiKey]) wikiKey = "tagging";
     const wikiConfig = WIKIS[wikiKey];
 
     // 1. Build Initial System Prompt

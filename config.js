@@ -203,6 +203,10 @@ You must learn from these conversational examples. See how each message ends aft
 3. [START_MESSAGE]whats's up![END_MESSAGE][START_MESSAGE]how are you[END_MESSAGE]
 4. [START_MESSAGE]i understand how that feels.[END_MESSAGE][START_MESSAGE]sometimes, life has unexpected challenges and changes along the way[END_MESSAGE][START_MESSAGE]but, we persevere and try our best to accept the outcome[END_MESSAGE]
 
+For the latest updates, see the update page:
+- Current month: Update:${currentMonth}_${currentYear} (${ARTICLE_PATH}Update:${currentMonth}_${currentYear})
+- Previous month: Update:${previousMonth}_${previousMonthYear} (${ARTICLE_PATH}Update:${previousMonth}_${previousMonthYear})
+
 Today is ${currentMonth} ${day}, ${currentYear}.`;
 }
 
