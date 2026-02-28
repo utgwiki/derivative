@@ -1,5 +1,10 @@
 const { fetch } = require("./utils.js");
 
+function escapeMarkdown(text) {
+    if (!text) return "";
+    return text.replace(/([\\`*_{}[\]()#+-.!|])/g, "\\$1");
+}
+
 async function getContributionScores(wikiConfig) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -58,8 +63,10 @@ async function getContributionScores(wikiConfig) {
         userData.forEach((data, i) => {
             const paddedScore = data.score.padStart(maxScoreLength, ' ');
             const paddedEdits = data.edits.padStart(maxEditLength, ' ');
+            const displayName = escapeMarkdown(data.user);
+            const urlName = encodeURIComponent(data.user);
 
-            dataSummary += `${i + 1}. <:playerpoint:1472433775593000961> \`${paddedScore}\`    ✏️ \`${paddedEdits}\`    **[@${data.user}](${wikiConfig.articlePath}User:${data.user})**\n`;
+            dataSummary += `${i + 1}. <:playerpoint:1472433775593000961> \`${paddedScore}\`    ✏️ \`${paddedEdits}\`    **[@${displayName}](${wikiConfig.articlePath}User:${urlName})**\n`;
         });
 
         return {

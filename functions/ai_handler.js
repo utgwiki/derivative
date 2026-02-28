@@ -139,9 +139,16 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         let imageParts = [];
 
         if (uniqueImageURLs.length > 0) {
-            const partPromises = uniqueImageURLs.map(url => urlToGenerativePart(url));
-            const parts = await Promise.all(partPromises);
-            imageParts = parts.filter(part => part !== null);
+            const results = await Promise.allSettled(uniqueImageURLs.map(url => urlToGenerativePart(url)));
+            imageParts = results
+                .filter(r => r.status === 'fulfilled' && r.value !== null)
+                .map(r => r.value);
+
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') {
+                    console.warn(`Failed to process image URL ${uniqueImageURLs[i]}:`, r.reason);
+                }
+            });
         }
 
         if (imageParts.length > 0) {
@@ -279,16 +286,30 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
         const fetchPageImage = async (title) => {
             if (!title) return null;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 3000);
             try {
                 const cleanTitle = title.includes(" § ") ? title.split(" § ")[0] : title.split("#")[0];
-                const imageRes = await fetch(`${wikiConfig.apiEndpoint}?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=pageimages&pithumbsize=512&format=json`);
+                const imageRes = await fetch(`${wikiConfig.apiEndpoint}?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=pageimages&pithumbsize=512&format=json`, {
+                    signal: controller.signal
+                });
+
+                if (!imageRes.ok) throw new Error(`HTTP error! status: ${imageRes.status}`);
+
                 const imageJson = await imageRes.json();
                 const pages = imageJson.query?.pages;
                 const first = pages ? Object.values(pages)[0] : null;
                 const src = first?.thumbnail?.source || null;
                 return getFullSizeImageUrl(src);
             } catch (err) {
+                if (err.name === 'AbortError') {
+                    console.warn(`Image fetch timed out for ${title}`);
+                } else {
+                    console.error(`Error fetching page image for ${title}:`, err.message);
+                }
                 return null;
+            } finally {
+                clearTimeout(timeout);
             }
         }
 

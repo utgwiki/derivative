@@ -164,12 +164,14 @@ async function getPageData(pageTitle, wikiConfig) {
     const canonical = await findCanonicalTitle(pageTitle, wikiConfig);
     if (!canonical) return null;
 
+    const cleanTitle = canonical.includes("#") ? canonical.split("#")[0] : canonical;
+
     const params = new URLSearchParams({
         action: "query",
         prop: "extracts|pageimages",
         exintro: "1",
         redirects: "1",
-        titles: canonical,
+        titles: cleanTitle,
         pithumbsize: "512",
         format: "json"
     });
@@ -196,11 +198,13 @@ async function getPageData(pageTitle, wikiConfig) {
 
 async function getSectionIndex(pageTitle, sectionName, wikiConfig) {
     const canonical = await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
+    const cleanTitle = canonical.includes("#") ? canonical.split("#")[0] : canonical;
+
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
         prop: "sections",
-        page: canonical
+        page: cleanTitle
     });
 
     try {
@@ -233,11 +237,14 @@ async function getSectionContent(pageTitle, sectionName, wikiConfig) {
     const sectionInfo = await getSectionIndex(pageTitle, sectionName, wikiConfig);
     if (!sectionInfo) return null;
 
+    const canonical = await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
+    const cleanTitle = canonical.includes("#") ? canonical.split("#")[0] : canonical;
+
     const params = new URLSearchParams({
         action: "parse",
         format: "json",
         prop: "text",
-        page: pageTitle,
+        page: cleanTitle,
         section: sectionInfo.index
     });
 
@@ -386,9 +393,10 @@ async function loadPages() {
 }
 
 async function getWikiContent(pageTitle, wikiConfig) {
+    const cleanTitle = pageTitle.includes("#") ? pageTitle.split("#")[0] : pageTitle;
     const params = new URLSearchParams({
         action: "parse",
-        page: pageTitle,
+        page: cleanTitle,
         format: "json",
         prop: "text",
     });

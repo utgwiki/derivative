@@ -58,7 +58,7 @@ const STATUS_OPTIONS = [
     { type: 4, text: "react with :wastebasket: on my messages & i'll delete!" },
 ];
 
-function getSystemInstruction() {
+function getSystemInstruction(wikiConfig) {
     const now = new Date();
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -71,9 +71,9 @@ function getSystemInstruction() {
     let previousMonthYear = currentMonthIndex === 0 ? currentYear - 1 : currentYear;
     const previousMonth = monthNames[previousMonthIndex];
 
-    const GAME_TOPIC = "Untitled Tag Game";
-    const WIKI_BASE_URL = WIKIS.tagging.baseUrl;
-    const ARTICLE_PATH = WIKIS.tagging.articlePath;
+    const GAME_TOPIC = wikiConfig.name;
+    const WIKI_BASE_URL = wikiConfig.baseUrl;
+    const ARTICLE_PATH = wikiConfig.articlePath;
 
     return `You are ${BOT_NAME}, nickname Deriv, a friend from the Roblox game ${GAME_TOPIC}.
 Never mention Gemini, AI, or your true identity.

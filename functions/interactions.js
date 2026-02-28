@@ -324,17 +324,23 @@ async function handleUserRequest(wikiConfig, rawPageName, messageOrInteraction, 
 
     } catch (err) {
         console.error("Error handling request:", err);
-        const errorMsg = { content: "An error occurred while processing your request.", ephemeral: true };
+        const errorContent = "An error occurred while processing your request.";
         if (isInteraction(messageOrInteraction)) {
+            const interactionErrorMsg = { content: errorContent, ephemeral: true };
             if (messageOrInteraction.deferred) {
-                await messageOrInteraction.editReply(errorMsg).catch(() => {});
+                await messageOrInteraction.editReply(interactionErrorMsg).catch(() => {});
             } else if (messageOrInteraction.replied) {
-                await messageOrInteraction.followUp(errorMsg).catch(() => {});
+                await messageOrInteraction.followUp(interactionErrorMsg).catch(() => {});
             } else {
-                await messageOrInteraction.reply(errorMsg).catch(() => {});
+                await messageOrInteraction.reply(interactionErrorMsg).catch(() => {});
             }
         } else {
-            await messageOrInteraction.reply(errorMsg).catch(() => {});
+            const messageErrorMsg = { content: errorContent };
+            if (typeof messageOrInteraction.reply === 'function') {
+                await messageOrInteraction.reply(messageErrorMsg).catch(() => {});
+            } else if (messageOrInteraction.channel) {
+                await messageOrInteraction.channel.send(messageErrorMsg).catch(() => {});
+            }
         }
     } finally {
         if (typingInterval) clearInterval(typingInterval);
@@ -409,13 +415,13 @@ async function handleInteraction(interaction) {
             }
         } catch (err) {
             console.error(`Error executing wiki command:`, err);
-            const errorMsg = { content: "An error occurred while executing the command.", ephemeral: true };
-            if (interaction.replied) {
-                await interaction.followUp(errorMsg).catch(() => {});
-            } else if (interaction.deferred) {
-                await interaction.editReply({ content: errorMsg.content }).catch(() => {});
+            const errorContent = "An error occurred while executing the command.";
+            if (interaction.deferred) {
+                await interaction.editReply({ content: errorContent }).catch(() => {});
+            } else if (interaction.replied) {
+                await interaction.followUp({ content: errorContent, ephemeral: true }).catch(() => {});
             } else {
-                await interaction.reply(errorMsg).catch(() => {});
+                await interaction.reply({ content: errorContent, ephemeral: true }).catch(() => {});
             }
         }
     } else if (interaction.commandName === 'parse') {
@@ -446,13 +452,13 @@ async function handleInteraction(interaction) {
             }
         } catch (err) {
             console.error(`Error executing parse command:`, err);
-            const errorMsg = { content: "An error occurred while executing the command.", ephemeral: true };
-            if (interaction.replied) {
-                await interaction.followUp(errorMsg).catch(() => {});
-            } else if (interaction.deferred) {
-                await interaction.editReply({ content: errorMsg.content }).catch(() => {});
+            const errorContent = "An error occurred while executing the command.";
+            if (interaction.deferred) {
+                await interaction.editReply({ content: errorContent }).catch(() => {});
+            } else if (interaction.replied) {
+                await interaction.followUp({ content: errorContent, ephemeral: true }).catch(() => {});
             } else {
-                await interaction.reply(errorMsg).catch(() => {});
+                await interaction.reply({ content: errorContent, ephemeral: true }).catch(() => {});
             }
         }
     }
