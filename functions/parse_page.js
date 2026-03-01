@@ -1,4 +1,4 @@
-const { fetch } = require("./utils.js");
+const { fetch, resolveWikiKey } = require("./utils.js");
 const { WIKIS } = require("../config.js");
 const cheerio = require('cheerio');
 
@@ -126,7 +126,7 @@ function htmlToMarkdown(html, baseUrl) {
 async function findCanonicalTitle(input, wikiConfig) {
     if (!input) return null;
     const raw = String(input).trim();
-    const wikiKey = wikiConfig.key || "tagging";
+    const wikiKey = wikiConfig.key || resolveWikiKey(wikiConfig.baseUrl, WIKIS);
 
     if (pageLookupByWiki.has(wikiKey)) {
         const lookup = pageLookupByWiki.get(wikiKey);
@@ -367,7 +367,9 @@ async function getAllNamespaces(wikiConfig) {
             .map(([k, v]) => parseInt(k, 10))
             .filter(id => id >= 0 && id % 2 === 0);
     } catch (err) {
-        console.error(`Failed to fetch namespaces for ${wikiConfig.name}:`, err.message);
+        // Fallback to Main (0) and Project (4) namespaces if lookup fails.
+        // These are conservative defaults used by most MediaWiki installations.
+        console.warn(`Failed to fetch namespaces for ${wikiConfig.name}, falling back to defaults [0, 4]:`, err.message);
         return [0, 4];
     }
 }

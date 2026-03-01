@@ -9,16 +9,16 @@ const WIKIS = {
         apiEndpoint: "https://tagging.wiki/w/api.php",
         articlePath: "https://tagging.wiki/wiki/",
         prefix: "utg",
-        emoji: "1472436401680158741"
+        emoji: "1477539484601028662"
     },
     "farm": {
         key: "farm",
-        name: "Farm",
+        name: "Untitled Farming Game",
         baseUrl: "https://farm.miraheze.org",
         apiEndpoint: "https://farm.miraheze.org/w/api.php",
         articlePath: "https://farm.miraheze.org/wiki/",
         prefix: "farm",
-        emoji: "1472436382998728714"
+        emoji: "1477539596509118566"
     }
 };
 
@@ -44,7 +44,7 @@ const STATUS_OPTIONS = [
     { type: 4, text: "just send [[a page]] or {{a page}}!" },
     { type: 4, text: "now supporting multiple wikis!" },
     { type: 4, text: "use [[utg:page]] for Untitled Tag Game embedding" },
-    { type: 4, text: "use [[farm:Page]] for Farm embedding" },
+    { type: 4, text: "use [[farm:Page]] for Untitled Farming Game embedding" },
     { type: 4, text: "tagging.wiki" },
     { type: 4, text: "farm.miraheze.org" },
     { type: 4, text: "₊˚⊹⋆" },
@@ -52,9 +52,9 @@ const STATUS_OPTIONS = [
     { type: 4, text: "✶⋆.˚" },
     { type: 4, text: "°˖➴" },
     { type: 0, text: "Untitled Tag Game" },
-    { type: 0, text: "Farm" },
+    { type: 0, text: "Untitled Farming Game" },
     { type: 5, text: "Untitled Tag Game" },
-    { type: 5, text: "Farm" },
+    { type: 5, text: "Untitled Farming Game" },
     { type: 3, text: "A Block's Journey teaser trailer" },
     { type: 4, text: "edit your message and my embed will too!" },
     { type: 4, text: "react with :wastebasket: on my messages & i'll delete!" },

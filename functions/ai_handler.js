@@ -117,8 +117,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
     let typingInterval;
     if (contextMessage.channel?.sendTyping) {
-        messageOrInteraction.channel.sendTyping().catch(() => {});
-        typingInterval = setInterval(() => messageOrInteraction.channel.sendTyping().catch(() => {}), 8000);
+        contextMessage.channel.sendTyping().catch(() => {});
+        typingInterval = setInterval(() => contextMessage.channel.sendTyping().catch(() => {}), 8000);
     }
 
     try {
