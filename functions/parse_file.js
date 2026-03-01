@@ -1,4 +1,4 @@
-const { fetch } = require("./utils.js");
+const { fetch, smartReply: sharedSmartReply } = require("./utils.js");
 const {
     ContainerBuilder,
     MediaGalleryBuilder,
@@ -18,36 +18,18 @@ const { BOT_NAME } = require("../config.js");
  * @param {object} messageOrInteraction - The Discord message or interaction object.
  */
 async function handleFileRequest(wikiConfig, fileName, messageOrInteraction) {
-    const isInteraction = (interaction) => interaction && (interaction.editReply || interaction.followUp);
+    const smartReply = (payload) => sharedSmartReply(messageOrInteraction, payload, MessageFlags);
 
-    const smartReply = async (payload) => {
-        if (isInteraction(messageOrInteraction)) {
-            if (messageOrInteraction.replied) return messageOrInteraction.followUp(payload);
-            if (messageOrInteraction.deferred) return messageOrInteraction.editReply(payload);
-            return messageOrInteraction.reply(payload);
-        } else {
-            const sanitizedPayload = { ...payload };
-            delete sanitizedPayload.ephemeral;
-
-            // Preserve IsComponentsV2 flag for non-interaction messages
-            if (sanitizedPayload.flags && (sanitizedPayload.flags & MessageFlags.IsComponentsV2)) {
-                sanitizedPayload.flags = MessageFlags.IsComponentsV2;
-            } else {
-                delete sanitizedPayload.flags;
-            }
-
-            if (typeof messageOrInteraction.reply === 'function') {
-                return messageOrInteraction.reply(sanitizedPayload);
-            } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
-                return messageOrInteraction.channel.send(sanitizedPayload);
-            }
-        }
-    };
+    // Trim and validate fileName
+    const trimmedFileName = (fileName || "").trim();
+    if (!trimmedFileName) {
+        return await smartReply({ content: "Please provide a valid file name.", ephemeral: true });
+    }
 
     // Ensure fileName starts with "File:" (namespace 6)
-    let searchTitle = fileName;
+    let searchTitle = trimmedFileName;
     if (!searchTitle.toLowerCase().startsWith("file:")) {
-        searchTitle = "File:" + fileName;
+        searchTitle = "File:" + trimmedFileName;
     }
 
     const params = new URLSearchParams({
@@ -78,12 +60,12 @@ async function handleFileRequest(wikiConfig, fileName, messageOrInteraction) {
 
         const page = Object.values(pages)[0];
         if (page.missing !== undefined) {
-            return await smartReply({ content: `File "${fileName}" not found on [${wikiConfig.name}](<${wikiConfig.baseUrl}>).`, ephemeral: true });
+            return await smartReply({ content: `File "${trimmedFileName}" not found on [${wikiConfig.name}](<${wikiConfig.baseUrl}>).`, ephemeral: true });
         }
 
         const info = page.imageinfo?.[0];
-        if (!info) {
-            return await smartReply({ content: "Could not retrieve file information.", ephemeral: true });
+        if (!info || !info.url) {
+            return await smartReply({ content: "Could not retrieve file information or URL.", ephemeral: true });
         }
 
         const url = info.url;

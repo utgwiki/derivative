@@ -13,7 +13,7 @@ const {
     MESSAGES
 } = require("./conversation.js");
 const { buildPageEmbed } = require("./interactions.js");
-const { fetch } = require("./utils.js");
+const { fetch, smartReply: sharedSmartReply } = require("./utils.js");
 const { BOT_NAME, WIKIS } = require("../config.js");
 const { MessageFlags } = require("discord.js");
 
@@ -78,27 +78,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
     const isInteraction = interaction => interaction && (interaction.editReply || interaction.followUp);
 
-    const smartReply = async (payload) => {
-        if (isInteraction(messageOrInteraction)) {
-            if (messageOrInteraction.replied) {
-                return messageOrInteraction.followUp(payload);
-            }
-            if (messageOrInteraction.deferred) {
-                return messageOrInteraction.editReply(payload);
-            }
-            return messageOrInteraction.reply(payload);
-        } else {
-            const sanitizedPayload = { ...payload };
-            delete sanitizedPayload.ephemeral;
-            delete sanitizedPayload.flags;
-
-            if (typeof messageOrInteraction.reply === 'function') {
-                return messageOrInteraction.reply(sanitizedPayload);
-            } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
-                return messageOrInteraction.channel.send(sanitizedPayload);
-            }
-        }
-    };
+    const smartReply = (payload) => sharedSmartReply(messageOrInteraction, payload, MessageFlags);
 
     let message = null;
     if (messageOrInteraction.attachments) {
