@@ -243,7 +243,13 @@ async function handleUserRequest(wikiConfig, rawPageName, messageOrInteraction, 
         } else {
             const sanitizedPayload = { ...payload };
             delete sanitizedPayload.ephemeral;
-            delete sanitizedPayload.flags;
+
+            // Preserve IsComponentsV2 flag for non-interaction messages
+            if (sanitizedPayload.flags && (sanitizedPayload.flags & MessageFlags.IsComponentsV2)) {
+                sanitizedPayload.flags = MessageFlags.IsComponentsV2;
+            } else {
+                delete sanitizedPayload.flags;
+            }
 
             if (typeof messageOrInteraction.reply === 'function') {
                 return messageOrInteraction.reply(sanitizedPayload);
