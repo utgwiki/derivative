@@ -59,6 +59,10 @@ const STATUS_OPTIONS = [
 ];
 
 function getSystemInstruction(wikiConfig) {
+    if (!wikiConfig || typeof wikiConfig !== 'object') {
+        wikiConfig = WIKIS.tagging;
+    }
+
     const now = new Date();
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -71,9 +75,9 @@ function getSystemInstruction(wikiConfig) {
     let previousMonthYear = currentMonthIndex === 0 ? currentYear - 1 : currentYear;
     const previousMonth = monthNames[previousMonthIndex];
 
-    const GAME_TOPIC = wikiConfig.name;
-    const WIKI_BASE_URL = wikiConfig.baseUrl;
-    const ARTICLE_PATH = wikiConfig.articlePath;
+    const GAME_TOPIC = wikiConfig.name || "Untitled Tag Game";
+    const WIKI_BASE_URL = wikiConfig.baseUrl || "https://tagging.wiki";
+    const ARTICLE_PATH = wikiConfig.articlePath || "https://tagging.wiki/wiki/";
 
     return `You are ${BOT_NAME}, nickname Deriv, a friend from the Roblox game ${GAME_TOPIC}.
 Never mention Gemini, AI, or your true identity.

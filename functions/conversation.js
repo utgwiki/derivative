@@ -3,6 +3,7 @@ const { MAIN_KEYS } = require("../geminikey.js");
 const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
 const { performSearch, getWikiContent, findCanonicalTitle, knownPagesByWiki } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL, WIKIS, CATEGORY_WIKI_MAP } = require("../config.js");
+const { resolveWikiKey } = require("./utils.js");
 
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -136,7 +137,7 @@ async function askGeminiForPages(userInput, wikiConfig) {
     const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
 
     // Resolve per-wiki page list if available
-    const wikiKey = Object.keys(WIKIS).find(k => WIKIS[k].baseUrl === wikiConfig.baseUrl) || "tagging";
+    const wikiKey = resolveWikiKey(wikiConfig.baseUrl, WIKIS);
     const wikiPages = knownPagesByWiki.get(wikiKey) || [];
 
     const prompt = `User asked: "${userInput}"
@@ -152,7 +153,6 @@ If none are relevant, return "NONE".`;
             config: { maxOutputTokens: 100 },
         });
         const text = extractText(result);
-        console.log(text);
         if (!text || text === "NONE") return [];
         return [...new Set(
             text.split("\n")

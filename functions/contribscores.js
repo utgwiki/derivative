@@ -1,9 +1,4 @@
-const { fetch } = require("./utils.js");
-
-function escapeMarkdown(text) {
-    if (!text) return "";
-    return text.replace(/([\\`*_{}[\]()#+-.!|])/g, "\\$1");
-}
+const { fetch, escapeMarkdown } = require("./utils.js");
 
 async function getContributionScores(wikiConfig) {
     const controller = new AbortController();

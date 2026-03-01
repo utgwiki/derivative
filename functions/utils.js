@@ -11,4 +11,13 @@ const fetch = async (...args) => {
     return fetchInstance(...args);
 };
 
-module.exports = { fetch };
+function resolveWikiKey(baseUrl, wikis) {
+    return Object.keys(wikis).find(k => wikis[k].baseUrl === baseUrl) || "tagging";
+}
+
+function escapeMarkdown(text) {
+    if (!text) return "";
+    return text.replace(/([\\`*_{}[\]()#+-.!|])/g, "\\$1");
+}
+
+module.exports = { fetch, resolveWikiKey, escapeMarkdown };

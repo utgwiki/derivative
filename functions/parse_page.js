@@ -1,4 +1,4 @@
-const { fetch } = require("./utils.js");
+const { fetch, resolveWikiKey } = require("./utils.js");
 const cheerio = require('cheerio');
 
 let knownPagesByWiki = new Map();
@@ -125,7 +125,9 @@ function htmlToMarkdown(html, baseUrl) {
 async function findCanonicalTitle(input, wikiConfig) {
     if (!input) return null;
     const raw = String(input).trim();
-    const wikiKey = Object.keys(require("../config.js").WIKIS).find(k => require("../config.js").WIKIS[k].baseUrl === wikiConfig.baseUrl);
+
+    const { WIKIS } = require("../config.js");
+    const wikiKey = resolveWikiKey(wikiConfig.baseUrl, WIKIS);
 
     if (wikiKey && pageLookupByWiki.has(wikiKey)) {
         const lookup = pageLookupByWiki.get(wikiKey);

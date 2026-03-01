@@ -102,7 +102,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         try {
             message = await messageOrInteraction.channel.messages.fetch(targetMessageId);
         } catch (err) {
-            console.warn("Failed to fetch message from modal customId in ai_handler:", err.message);
+            console.error(`Failed to fetch message ${targetMessageId} for modal interaction:`, err.message);
+            const errorMsg = "Could not retrieve the original message context. The request is being aborted.";
+            if (isInteraction(messageOrInteraction)) {
+                await messageOrInteraction.reply({ content: errorMsg, ephemeral: true });
+            } else {
+                await messageOrInteraction.reply({ content: errorMsg });
+            }
+            return;
         }
     }
 
@@ -429,9 +436,16 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     if (isInteraction(messageOrInteraction)) {
                         await messageOrInteraction.followUp(embedPayload);
                     } else if (messageOrInteraction.channel) {
-                        const sanitizedEmbedPayload = { ...embedPayload };
-                        delete sanitizedEmbedPayload.flags;
-                        await messageOrInteraction.channel.send(sanitizedEmbedPayload);
+                        try {
+                            const sanitizedEmbedPayload = { ...embedPayload };
+                            delete sanitizedEmbedPayload.flags;
+                            await messageOrInteraction.channel.send(sanitizedEmbedPayload);
+                        } catch (err) {
+                            console.warn("Failed to send secondary embed components to channel, falling back to content-only:", err.message);
+                            await messageOrInteraction.channel.send({
+                                content: `[**${displayTitle}**](<${wikiConfig.articlePath}${encodeURIComponent(title.replace(/ /g, "_"))}>)\n${wikiAbstract}`
+                            });
+                        }
                     }
 
                     await new Promise(r => setTimeout(r, 500));
