@@ -11,7 +11,7 @@ const {
     CATEGORY_WIKI_MAP,
     BOT_NAME
 } = require("../config.js");
-const { fetch } = require("./utils.js");
+const { fetch, smartReply: sharedSmartReply } = require("./utils.js");
 const { logMessage } = require("../memory.js");
 const { handleAIRequest } = require("./ai_handler.js");
 
@@ -222,36 +222,7 @@ async function handleUserRequest(wikiConfig, rawPageName, messageOrInteraction, 
         return await handleFileRequest(wikiConfig, rawPageName.slice(5).trim(), messageOrInteraction);
     }
 
-    const isInteraction = (interaction) => interaction && (interaction.editReply || interaction.followUp);
-
-    const smartReply = async (payload) => {
-        if (botMessageToEdit) {
-            try {
-                return await botMessageToEdit.edit(payload);
-            } catch (err) {
-                console.warn("Failed to edit message, sending new one instead:", err.message);
-            }
-        }
-        if (isInteraction(messageOrInteraction)) {
-            if (messageOrInteraction.deferred) {
-                return messageOrInteraction.editReply(payload);
-            }
-            if (messageOrInteraction.replied) {
-                return messageOrInteraction.followUp(payload);
-            }
-            return messageOrInteraction.reply(payload);
-        } else {
-            const sanitizedPayload = { ...payload };
-            delete sanitizedPayload.ephemeral;
-            delete sanitizedPayload.flags;
-
-            if (typeof messageOrInteraction.reply === 'function') {
-                return messageOrInteraction.reply(sanitizedPayload);
-            } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
-                return messageOrInteraction.channel.send(sanitizedPayload);
-            }
-        }
-    };
+    const smartReply = (payload) => sharedSmartReply(messageOrInteraction, payload, MessageFlags, botMessageToEdit);
 
     const contextMessage = messageOrInteraction;
     let typingInterval;
@@ -328,23 +299,7 @@ async function handleUserRequest(wikiConfig, rawPageName, messageOrInteraction, 
     } catch (err) {
         console.error("Error handling request:", err);
         const errorContent = "An error occurred while processing your request.";
-        if (isInteraction(messageOrInteraction)) {
-            const interactionErrorMsg = { content: errorContent, ephemeral: true };
-            if (messageOrInteraction.deferred) {
-                await messageOrInteraction.editReply(interactionErrorMsg).catch(() => {});
-            } else if (messageOrInteraction.replied) {
-                await messageOrInteraction.followUp(interactionErrorMsg).catch(() => {});
-            } else {
-                await messageOrInteraction.reply(interactionErrorMsg).catch(() => {});
-            }
-        } else {
-            const messageErrorMsg = { content: errorContent };
-            if (typeof messageOrInteraction.reply === 'function') {
-                await messageOrInteraction.reply(messageErrorMsg).catch(() => {});
-            } else if (messageOrInteraction.channel) {
-                await messageOrInteraction.channel.send(messageErrorMsg).catch(() => {});
-            }
-        }
+        await smartReply({ content: errorContent, ephemeral: true }).catch(() => {});
     } finally {
         if (typingInterval) clearInterval(typingInterval);
         if (typingTimeout) clearTimeout(typingTimeout);
