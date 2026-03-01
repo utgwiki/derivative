@@ -66,7 +66,7 @@ const STATUS_OPTIONS = [
     { type: 0, text: "Untitled Farming Game" },
     { type: 5, text: "Untitled Tag Game" },
     { type: 5, text: "Untitled Farming Game" },
-    { type: 3, text: "A Block's Journey teaser trailer" },
+    { type: 3, text: "Untitled Tag Game trailer" },
     { type: 4, text: "edit your message and my embed will too!" },
     { type: 4, text: "react with :wastebasket: on my messages & i'll delete!" },
 ];
