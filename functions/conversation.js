@@ -4,8 +4,7 @@ const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = re
 const { performSearch, getWikiContent, findCanonicalTitle, knownPagesByWiki } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL, WIKIS, CATEGORY_WIKI_MAP } = require("../config.js");
 
-// node-fetch
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const { fetch } = require("./utils.js");
 
 // Dynamic import for Gemini with deduplicated initialization
 const geminiClients = new Map();

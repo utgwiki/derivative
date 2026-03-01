@@ -62,6 +62,7 @@ const STATUS_OPTIONS = [
 
 function getSystemInstruction(wikiConfig) {
     if (!wikiConfig || typeof wikiConfig !== 'object') {
+        console.error("getSystemInstruction: wikiConfig is undefined or invalid. Falling back to default.");
         wikiConfig = WIKIS.tagging;
     }
 

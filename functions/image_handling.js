@@ -1,4 +1,4 @@
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const { fetch } = require("./utils.js");
 
 async function urlToGenerativePart(url) {
     try {

@@ -389,6 +389,48 @@ async function handleInteraction(interaction) {
         return;
     }
 
+    if (interaction.isModalSubmit()) {
+        const modalId = interaction.customId;
+        if (!modalId.startsWith("deriv_modal_")) return;
+
+        const targetMessageId = modalId.replace("deriv_modal_", "");
+        let question = interaction.fields.getTextInputValue("user_question");
+
+        const { logMessage } = require("../memory.js");
+        const { handleAIRequest } = require("./ai_handler.js");
+        const { ChannelType } = require("discord.js");
+
+        let message;
+        try {
+            message = await interaction.channel.messages.fetch(targetMessageId);
+        } catch (err) {
+            return interaction.reply({ content: "Could not find the original message.", ephemeral: true });
+        }
+
+        if (!question || question.trim() === "") {
+            question = "Please analyze and respond to the following message content based on the system instructions.";
+        }
+
+        const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
+
+        logMessage(
+            interaction.channelId,
+            interaction.user.username,
+            userPrompt,
+            interaction.createdTimestamp
+        );
+
+        const isPrivateChannel = interaction.channel && (interaction.channel.type === ChannelType.DM || interaction.channel.type === ChannelType.GroupDM);
+        const ephemeralSetting = !isPrivateChannel;
+
+        const wikiKey = CATEGORY_WIKI_MAP[interaction.channel.parentId] || "tagging";
+        const defaultWikiConfig = WIKIS[wikiKey];
+
+        await interaction.deferReply({ ephemeral: ephemeralSetting });
+        await handleAIRequest(userPrompt, userPrompt, interaction, defaultWikiConfig, ephemeralSetting);
+        return;
+    }
+
     if (!interaction.isCommand()) return;
 
     if (interaction.commandName === 'contribscores') {

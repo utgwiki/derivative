@@ -3,7 +3,7 @@ require("dotenv").config();
 const { setRandomStatus } = require("./functions/presence.js");
 const { commands } = require("./functions/commands.js");
 const { 
-    handleInteraction: baseHandleInteraction,
+    handleInteraction,
     handleUserRequest: handleWikiRequest,
     responseMap,
     botToAuthorMap,
@@ -348,49 +348,6 @@ client.on("messageReactionAdd", async (reaction, user) => {
         }
     }
 });
-
-async function handleInteraction(interaction) {
-    if (interaction.isModalSubmit()) {
-        const modalId = interaction.customId;
-        if (!modalId.startsWith("deriv_modal_")) return;
-
-        const targetMessageId = modalId.replace("deriv_modal_", "");
-        let question = interaction.fields.getTextInputValue("user_question");
-
-        // Remove reliance on global client._selectedMessage
-        let message;
-        try {
-            message = await interaction.channel.messages.fetch(targetMessageId);
-        } catch (err) {
-            return interaction.reply({ content: "Could not find the original message.", ephemeral: true });
-        }
-
-        if (!question || question.trim() === "") {
-            question = "Please analyze and respond to the following message content based on the system instructions.";
-        }
-
-        const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
-
-        logMessage(
-            interaction.channelId,
-            interaction.user.username,
-            userPrompt,
-            interaction.createdTimestamp
-        );
-
-        const isPrivateChannel = interaction.channel && (interaction.channel.type === ChannelType.DM || interaction.channel.type === ChannelType.GroupDM);
-        const ephemeralSetting = !isPrivateChannel;
-
-        const wikiKey = CATEGORY_WIKI_MAP[interaction.channel.parentId] || "tagging";
-        const defaultWikiConfig = WIKIS[wikiKey];
-
-        await interaction.deferReply({ ephemeral: ephemeralSetting });
-        await handleAIRequest(userPrompt, userPrompt, interaction, defaultWikiConfig, ephemeralSetting);
-        return;
-    }
-
-    await baseHandleInteraction(interaction);
-}
 
 client.on("interactionCreate", (interaction) => {
     handleInteraction(interaction).catch(err => console.error("Interaction error:", err));
