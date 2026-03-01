@@ -1,4 +1,5 @@
 const { fetch, escapeMarkdown } = require("./utils.js");
+const { BOT_NAME } = require("../config.js");
 
 async function getContributionScores(wikiConfig) {
     const controller = new AbortController();
@@ -16,7 +17,7 @@ async function getContributionScores(wikiConfig) {
         const url = `${wikiConfig.apiEndpoint}?${params.toString()}`;
         const res = await fetch(url, {
             signal: controller.signal,
-            headers: { "User-Agent": "DiscordBot/Orbital" }
+            headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
         });
 
         if (!res.ok) {

@@ -125,8 +125,9 @@ function htmlToMarkdown(html, baseUrl) {
 // --- WIKI API FUNCTIONS ---
 async function findCanonicalTitle(input, wikiConfig) {
     if (!input) return null;
+    wikiConfig = wikiConfig || {};
     const raw = String(input).trim();
-    const wikiKey = wikiConfig.key || resolveWikiKey(wikiConfig.baseUrl, WIKIS);
+    const wikiKey = wikiConfig.key || (wikiConfig.baseUrl ? resolveWikiKey(wikiConfig.baseUrl, WIKIS) : "tagging");
 
     if (pageLookupByWiki.has(wikiKey)) {
         const lookup = pageLookupByWiki.get(wikiKey);
@@ -227,8 +228,8 @@ async function getPageData(pageTitle, wikiConfig) {
     }
 }
 
-async function getSectionIndex(pageTitle, sectionName, wikiConfig) {
-    const canonical = await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
+async function getSectionIndex(pageTitle, sectionName, wikiConfig, canonicalTitle = null) {
+    const canonical = canonicalTitle || await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
     const cleanTitle = canonical.includes("#") ? canonical.split("#")[0] : canonical;
 
     const params = new URLSearchParams({
@@ -265,10 +266,10 @@ async function getSectionIndex(pageTitle, sectionName, wikiConfig) {
 }
 
 async function getSectionContent(pageTitle, sectionName, wikiConfig) {
-    const sectionInfo = await getSectionIndex(pageTitle, sectionName, wikiConfig);
+    const canonical = await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
+    const sectionInfo = await getSectionIndex(pageTitle, sectionName, wikiConfig, canonical);
     if (!sectionInfo) return null;
 
-    const canonical = await findCanonicalTitle(pageTitle, wikiConfig) || pageTitle;
     const cleanTitle = canonical.includes("#") ? canonical.split("#")[0] : canonical;
 
     const params = new URLSearchParams({

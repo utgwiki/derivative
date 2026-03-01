@@ -1,7 +1,18 @@
 // --- WIKI CONFIGURATION ---
 const BOT_NAME = "Derivative"; 
 
-const WIKIS = {
+function deepFreeze(object) {
+    const propNames = Object.getOwnPropertyNames(object);
+    for (const name of propNames) {
+        const value = object[name];
+        if (value && typeof value === "object") {
+            deepFreeze(value);
+        }
+    }
+    return Object.freeze(object);
+}
+
+const WIKIS = deepFreeze({
     "tagging": {
         key: "tagging",
         name: "Untitled Tag Game",
@@ -20,7 +31,7 @@ const WIKIS = {
         prefix: "farm",
         emoji: "1477539596509118566"
     }
-};
+});
 
 const CATEGORY_WIKI_MAP = {
     // Fill with category IDs if needed

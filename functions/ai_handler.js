@@ -64,17 +64,20 @@ function extractTaggedBotChunks(text) {
 }
 
 async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wikiConfig, isEphemeral = false, isProactive = false) {
+    const rawUserMsgSafe = (rawUserMsg || '').toString();
+    const wikiConfigSafe = Object.assign({ baseUrl: '' }, wikiConfig || {});
+
     if (!promptMsg || !promptMsg.trim()) return MESSAGES.noAIResponse;
 
     const isInteraction = interaction => interaction && (interaction.editReply || interaction.followUp);
 
     const smartReply = async (payload) => {
         if (isInteraction(messageOrInteraction)) {
-            if (messageOrInteraction.deferred) {
-                return messageOrInteraction.editReply(payload);
-            }
             if (messageOrInteraction.replied) {
                 return messageOrInteraction.followUp(payload);
+            }
+            if (messageOrInteraction.deferred) {
+                return messageOrInteraction.editReply(payload);
             }
             return messageOrInteraction.reply(payload);
         } else {
@@ -97,7 +100,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         message = messageOrInteraction.targetMessage;
     }
 
-    if (!message && messageOrInteraction.isModalSubmit && messageOrInteraction.customId?.startsWith("deriv_modal_")) {
+    if (!message && typeof messageOrInteraction.isModalSubmit === 'function' && messageOrInteraction.isModalSubmit() && messageOrInteraction.customId?.startsWith("deriv_modal_")) {
         const targetMessageId = messageOrInteraction.customId.replace("deriv_modal_", "");
         try {
             message = await messageOrInteraction.channel.messages.fetch(targetMessageId);
@@ -132,7 +135,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         }
 
         const urlRegex = /(https?:\/\/[^\s]+)/gi;
-        const matches = [...rawUserMsg.matchAll(urlRegex)];
+        const matches = [...rawUserMsgSafe.matchAll(urlRegex)];
         const imageExtRegex = /\.(jpe?g|png|gif|webp|svg)(\?.*)?$/i;
 
         for (const match of matches) {
@@ -160,7 +163,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
         if (imageParts.length > 0) {
              if (!promptMsg.trim()) {
-                promptMsg = `Analyze the attached media in the context of the wiki ${wikiConfig.baseUrl}`;
+                promptMsg = `Analyze the attached media in the context of the wiki ${wikiConfigSafe.baseUrl}`;
             } else {
                 promptMsg = `Analyze the attached media in the context of: ${promptMsg}`;
             }
@@ -170,7 +173,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
         let explicitTemplateGallery = null;
-        const templateMatch = rawUserMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}|\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/);
+        const templateMatch = rawUserMsgSafe.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}|\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/);
 
         let shouldUseComponentsV2 = false;
         let skipGemini = false;
@@ -215,7 +218,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (skipGemini) {
             if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
         } else {
-            pageTitles = await askGeminiForPages(rawUserMsg, wikiConfig);
+            pageTitles = await askGeminiForPages(rawUserMsgSafe, wikiConfig);
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
                     const content = await getWikiContent(pageTitle, wikiConfig);
@@ -378,23 +381,25 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     }
                 } else {
                     const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
-                    for (const [index, part] of replyParts.entries()) {
-                        const fallbackOptions = { content: part, allowedMentions: { repliedUser: false } };
-                        if (index === 0) {
-                            await smartReply(fallbackOptions);
-                        } else {
-                            if (isInteraction(messageOrInteraction)) {
-                                await messageOrInteraction.followUp(fallbackOptions);
-                            } else if (messageOrInteraction.channel) {
-                                const sanitizedFallbackOptions = { ...fallbackOptions };
-                                delete sanitizedFallbackOptions.ephemeral;
-                                delete sanitizedFallbackOptions.flags;
-                                await messageOrInteraction.channel.send(sanitizedFallbackOptions);
+                    if (replyParts.length > 0) {
+                        for (const [index, part] of replyParts.entries()) {
+                            const fallbackOptions = { content: part, allowedMentions: { repliedUser: false } };
+                            if (index === 0) {
+                                await smartReply(fallbackOptions);
+                                sent = true;
+                            } else {
+                                if (isInteraction(messageOrInteraction)) {
+                                    await messageOrInteraction.followUp(fallbackOptions);
+                                } else if (messageOrInteraction.channel) {
+                                    const sanitizedFallbackOptions = { ...fallbackOptions };
+                                    delete sanitizedFallbackOptions.ephemeral;
+                                    delete sanitizedFallbackOptions.flags;
+                                    await messageOrInteraction.channel.send(sanitizedFallbackOptions);
+                                }
                             }
                         }
                     }
                 }
-                sent = true;
             } catch (fallbackErr) {
                 console.error("Standard text reply failed:", fallbackErr);
             }

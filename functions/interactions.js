@@ -424,7 +424,7 @@ async function handleInteraction(interaction) {
         const ephemeralSetting = !isPrivateChannel;
 
         const wikiKey = CATEGORY_WIKI_MAP[interaction.channel.parentId] || "tagging";
-        const defaultWikiConfig = WIKIS[wikiKey];
+        const defaultWikiConfig = WIKIS[wikiKey] || WIKIS["tagging"];
 
         await interaction.deferReply({ ephemeral: ephemeralSetting });
         await handleAIRequest(userPrompt, userPrompt, interaction, defaultWikiConfig, ephemeralSetting);
