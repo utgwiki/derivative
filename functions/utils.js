@@ -64,6 +64,7 @@ async function smartReply(messageOrInteraction, payload, MessageFlags, botMessag
         } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
             return messageOrInteraction.channel.send(sanitizedPayload);
         }
+        throw new Error("smartReply could not send message: unsupported messageOrInteraction shape.");
     }
 }
 
