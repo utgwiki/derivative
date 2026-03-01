@@ -1,223 +1,101 @@
 require("dotenv").config();
 
-// --- IMPORTS ---
-const { MAIN_KEYS } = require("./geminikey.js");
-const { loadMemory, logMessage, memory: persistedMemory } = require("./memory.js");
-loadMemory(); 
-
-// NEW IMPORTS FROM FUNCTIONS FOLDER
-const { urlToGenerativePart } = require("./functions/image_handling.js");
-const { getContributionScores, contributionScoresTool } = require("./functions/contribscores.js");
+const { setRandomStatus } = require("./functions/presence.js");
+const { commands } = require("./functions/commands.js");
 const { 
-    loadPages, 
-    findCanonicalTitle, 
-    getWikiContent, 
-    getSectionContent, 
-    getLeadSection, 
-    parseWikiLinks, 
-    parseTemplates,
-    getFullSizeImageUrl,
-    knownPages, 
-    API         
-} = require("./functions/parse_page.js");
-const { 
-    askGemini, 
-    askGeminiForPages, 
-    MESSAGES 
-} = require("./functions/conversation.js");
+    handleInteraction,
+    handleUserRequest: handleWikiRequest,
+    responseMap,
+    botToAuthorMap,
+    pruneMap
+} = require("./functions/interactions.js");
+const { handleAIRequest } = require("./functions/ai_handler.js");
 
 const {
     Client,
     GatewayIntentBits,
     Partials,
-    MessageFlags,
-    ContainerBuilder,
-    SectionBuilder,
-    TextDisplayBuilder,
-    ThumbnailBuilder,
-    MediaGalleryBuilder,
-    MediaGalleryItemBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    ActionRowBuilder,
-    ActivityType,
-    ChannelType,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
+    ApplicationCommandType,
     ContextMenuCommandBuilder,
-    InteractionType,
-    ApplicationCommandType
+    ChannelType
 } = require("discord.js");
 
-const { BOT_SETTINGS, STATUS_OPTIONS, WIKI_ENDPOINTS, BOT_NAME } = require("./config.js");
-const { 
-    IGNORED_CHANNELS, 
-    TRIGGER_KEYWORDS, 
-    RESPONSE_CHANCE, 
-    MIN_FOLLOWUP_DELAY, 
-    MAX_FOLLOWUP_DELAY 
+const { WIKIS, CATEGORY_WIKI_MAP, STATUS_INTERVAL_MS, BOT_NAME, BOT_SETTINGS } = require("./config.js");
+const { logMessage } = require("./memory.js");
+const {
+    getHistory
+} = require("./functions/conversation.js");
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const {
+    IGNORED_CHANNELS,
+    TRIGGER_KEYWORDS,
+    RESPONSE_CHANCE,
+    MIN_FOLLOWUP_DELAY,
+    MAX_FOLLOWUP_DELAY
 } = BOT_SETTINGS;
 
 // --- FOLLOW-UP STATE MANAGER ---
-const activeConversations = new Map(); 
-
-// node-fetch wrapper 
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
-
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const activeConversations = new Map();
 
 // -------------------- UTILITIES --------------------
-const DISCORD_MAX_LENGTH = 2000;
-
-function splitMessage(text, maxLength = DISCORD_MAX_LENGTH) {
-    const messages = [];
-    let currentText = text;
-
-    while (currentText.length > 0) {
-        // If text fits, push and done
-        if (currentText.length <= maxLength) {
-            messages.push(currentText);
-            break;
-        }
-
-        // 1. Determine safe split position
-        // We reserve a slight buffer (e.g., 10 chars) in case we need to add code block tags
-        const searchLength = maxLength - 10;
-        
-        let splitIndex = currentText.lastIndexOf('\n', searchLength);
-        if (splitIndex === -1) splitIndex = currentText.lastIndexOf(' ', searchLength);
-        if (splitIndex === -1) splitIndex = searchLength;
-
-        let segment = currentText.slice(0, splitIndex).trim();
-        let remaining = currentText.slice(splitIndex).trim();
-
-        // 2. Check for unclosed code blocks (odd number of ```)
-        // matches '```' sequences
-        const backtickMatches = segment.match(/```/g);
-        const isInsideCodeBlock = backtickMatches && (backtickMatches.length % 2 !== 0);
-
-        if (isInsideCodeBlock) {
-            // Close the block in this segment
-            segment += "\n```";
-            // Re-open the block in the next segment
-            remaining = "```\n" + remaining;
-        }
-
-        messages.push(segment);
-        currentText = remaining;
-    }
-
-    return messages;
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function extractTaggedBotChunks(text) {
-    const out = [];
-    const re = /\[START_MESSAGE\]([\s\S]*?)\[END_MESSAGE\]/gi;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-        const cleaned = m[1].trim();
-        if (cleaned.length > 0) out.push(cleaned);
+const PREFIX_WIKI_MAP = Object.keys(WIKIS).reduce((acc, key) => {
+    const prefix = WIKIS[key].prefix;
+    if (prefix) acc[prefix] = key;
+    return acc;
+}, {});
+
+const prefixPattern = Object.values(WIKIS).map(w => escapeRegExp(w.prefix)).join('|');
+
+const syntaxRegex = new RegExp(
+    `\\{\\{(?:(${prefixPattern}):)?([^{}|]+)(?:\\|[^{}]*)?\\}\\}|` +
+    `\\[\\[(?:(${prefixPattern}):)?([^\\]|]+)(?:\\|[^[\\]]*)?\\]\\]`,
+    'i'
+);
+
+// -------------------- CLIENT SETUP --------------------
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.DirectMessageReactions,
+        GatewayIntentBits.MessageContent,
+    ],
+    partials: [Partials.Channel, Partials.Message, Partials.Reaction],
+});
+
+client.once("ready", async () => {
+    console.log(`Logged in as ${client.user.tag}`);
+    const { loadPages } = require("./functions/parse_page.js");
+    await loadPages();
+
+    setRandomStatus(client);
+    setInterval(() => { setRandomStatus(client); }, STATUS_INTERVAL_MS);
+
+    try {
+        console.log("Registering slash commands...");
+        const allCommands = [...commands,
+            new ContextMenuCommandBuilder()
+            .setName(`Ask ${BOT_NAME}...`)
+            .setType(ApplicationCommandType.Message)
+            .setContexts([0, 1, 2])
+            .setIntegrationTypes([0, 1])
+        ];
+        await client.application.commands.set(allCommands);
+        console.log("✅ Registered slash commands.");
+    } catch (err) {
+        console.error("Failed to register commands:", err);
     }
-    return out;
-}
+});
 
-// --- NEW: UNIFIED COMPONENT BUILDER ---
-function buildPageEmbed(title, content, imageUrl, gallery = null) {
-    const container = new ContainerBuilder();
-    
-    const hasContent = content && content !== "No content available.";
-    const hasGallery = gallery && gallery.length > 0;
-
-    // Suppression logic: if content is ONLY the "## Gallery" header and we have a media gallery, don't show the text section.
-    const isOnlyGalleryHeader = hasContent && content.trim() === "## Gallery";
-    const shouldShowTextSection = hasContent && !(isOnlyGalleryHeader && hasGallery);
-
-    const showEmbed = shouldShowTextSection || hasGallery;
-
-    if (showEmbed) {
-        const mainSection = new SectionBuilder();
-
-        // 1. Text Content
-        if (shouldShowTextSection) {
-            mainSection.addTextDisplayComponents([new TextDisplayBuilder().setContent(content)]);
-
-            // SectionBuilder requires an accessory (Thumbnail or Button) in this version of discord.js.
-            // We use the provided imageUrl, or a fallback transparent image.
-            const fallbackImage = "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png";
-
-            // If hasGallery is true, we use the fallback to avoid duplicate images (thumbnail + gallery)
-            const finalImageUrl = (!hasGallery && typeof imageUrl === "string" && imageUrl.trim() !== "") ? imageUrl : fallbackImage;
-
-            try {
-                mainSection.setThumbnailAccessory(thumbnail => thumbnail.setURL(finalImageUrl));
-            } catch (err) {
-                console.warn("Failed to set thumbnail accessory:", err.message);
-            }
-
-            container.addSectionComponents(mainSection);
-        }
-
-        // 2. Media Gallery (top-level container component)
-        if (hasGallery) {
-            const mediaGallery = new MediaGalleryBuilder();
-            gallery.slice(0, 10).forEach(item => {
-                const galleryItem = new MediaGalleryItemBuilder().setURL(item.url);
-                if (item.caption) {
-                    galleryItem.setDescription(item.caption.slice(0, 1000));
-                }
-                mediaGallery.addItems(galleryItem);
-            });
-            container.addMediaGalleryComponents(mediaGallery);
-        }
-    }
-    
-    // 3. Action Row (Link Button)
-    if (title) {
-        try {
-            let pageUrl;
-            if (title === "Special:ContributionScores") {
-                pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}Special:ContributionScores`;
-            } else {
-                const isSectionLink = String(title).includes(" § ");
-                const titleStr = String(title);
-                let pageOnly, frag;
-                if (isSectionLink) {
-                    const idx = titleStr.indexOf(" § ");
-                    pageOnly = idx !== -1 ? titleStr.slice(0, idx) : titleStr;
-                    frag = idx !== -1 ? titleStr.slice(idx + 3) : undefined;
-                } else {
-                    const idx = titleStr.indexOf("#");
-                    pageOnly = idx !== -1 ? titleStr.slice(0, idx) : titleStr;
-                    frag = idx !== -1 ? titleStr.slice(idx + 1) : undefined;
-                }
-                const parts = pageOnly.split(':').map(s => encodeURIComponent(s.replace(/ /g, "_")));
-                const anchor = frag ? '#' + encodeURIComponent(frag.replace(/ /g, '_')) : '';
-                pageUrl = `${WIKI_ENDPOINTS.ARTICLE_PATH}${parts.join(':')}${anchor}`;
-            }
-            
-            const row = new ActionRowBuilder();
-            const btn = new ButtonBuilder()
-                .setLabel(String(title).slice(0, 80))
-                .setStyle(ButtonStyle.Link)
-                .setURL(pageUrl);
-
-            // We don't have emoji in the single-wiki config currently, but we can add it if needed.
-    
-            if (btn) row.addComponents(btn);
-            if (row.components.length > 0) container.addActionRowComponents(row);
-        } catch (err) {
-            console.warn("Failed to build link button:", err.message);
-        }
-    }
-
-    return container;
-}
-
-// FOLLOW UP MESSAGES
-const { getHistory } = require("./functions/conversation.js"); 
-
-async function scheduleFollowUp(message) {
+// -------------------- FOLLOW-UP --------------------
+async function scheduleFollowUp(message, wikiConfig) {
     const channelId = message.channel.id;
     if (activeConversations.has(channelId)) {
         clearTimeout(activeConversations.get(channelId).timer);
@@ -228,35 +106,35 @@ async function scheduleFollowUp(message) {
     }
 
     const delay = Math.floor(Math.random() * (MAX_FOLLOWUP_DELAY - MIN_FOLLOWUP_DELAY + 1)) + MIN_FOLLOWUP_DELAY;
-    
+
     const timer = setTimeout(async () => {
         try {
             const channel = await client.channels.fetch(channelId).catch(() => null);
             if (!channel) return;
 
             const history = getHistory(channelId);
-            if (!history || history.length < 2) return; 
+            if (!history || history.length < 2) return;
 
             const delayText = delay < 60000 ? `${Math.round(delay/1000)} seconds` : `${Math.round(delay/60000)} minutes`;
-            const systemNote = `[SYSTEM: It has been ${delayText} since you last spoke. 
-            The user hasn't replied. 
-            Construct a short, casual follow-up message based on the previous conversation context above. 
-            Ask how they are, or bring up a related topic from the history. 
+            const systemNote = `[SYSTEM: It has been ${delayText} since you last spoke.
+            The user hasn't replied.
+            Construct a short, casual follow-up message based on the previous conversation context above.
+            Ask how they are, or bring up a related topic from the history.
             You are also allowed to make a new topic with what you know about the conversation. You are not limited in talking about the current topic.
-            Do NOT greet them like it's the first time. 
+            Do NOT greet them like it's the first time.
             If the last conversation ended naturally (like "bye"), do not send anything and output [TERMINATE_MESSAGE].]`;
 
             const mockMessage = {
                 channel: channel,
                 author: client.user,
                 client: client,
-                attachments: { size: 0 }, 
+                attachments: new Map(),
                 content: systemNote,
                 guild: channel.guild,
                 createdTimestamp: Date.now()
             };
-            
-            await handleUserRequest(systemNote, systemNote, mockMessage, false, true);
+
+            await handleAIRequest(systemNote, systemNote, mockMessage, wikiConfig, false, true);
 
         } catch (err) {
             console.error("Follow-up execution failed:", err);
@@ -271,432 +149,25 @@ async function scheduleFollowUp(message) {
     });
 }
 
-// -------------------- STATUS --------------------
-const STATUS_INTERVAL_MS = 1 * 60 * 1000;
-
-function setRandomStatus(client) {
-    if (!client || !client.user) return;
-    const newStatus = STATUS_OPTIONS[Math.floor(Math.random() * STATUS_OPTIONS.length)];
-    if (!newStatus || !newStatus.text || typeof newStatus.type !== "number") return;
-
-    try {
-        client.user.setPresence({
-            activities: [{ name: newStatus.text, type: newStatus.type }],
-            status: 'online',
-        });
-    } catch (err) {
-        console.error("Failed to set Discord status:", err);
-    }
-}
-
-// -------------------- CLIENT SETUP --------------------
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.MessageContent,
-    ],
-    partials: [Partials.Channel],
-});
-
-client.once("ready", async () => {
-    console.log(`Logged in as ${client.user.tag}`);
-    await loadPages(); 
-    setRandomStatus(client);
-    setInterval(() => { setRandomStatus(client); }, STATUS_INTERVAL_MS);
-
-    try {
-        console.log("Clearing existing global commands...");
-        await client.application.commands.set([]); 
-        
-        await client.application.commands.create(
-            new ContextMenuCommandBuilder()
-            .setName(`Ask ${BOT_NAME}...`)
-            .setType(ApplicationCommandType.Message)
-            .setContexts([0, 1, 2])
-            .setIntegrationTypes([0, 1])
-        );
-        console.log(`✅ Registered global context menu: Ask ${BOT_NAME}`);
-    } catch (err) {
-        console.error("Failed to register context command:", err);
-    }
-});
-
-// -------------------- HANDLER --------------------
-async function handleUserRequest(promptMsg, rawUserMsg, messageOrInteraction, isEphemeral = false, isProactive = false) {
-    if (!promptMsg || !promptMsg.trim()) return MESSAGES.noAIResponse;
-
-    const isInteraction = interaction => interaction.editReply || interaction.followUp;
-
-    const smartReply = async (payload) => {
-        if (isInteraction(messageOrInteraction)) {
-            if (messageOrInteraction.deferred || messageOrInteraction.replied) {
-                return messageOrInteraction.followUp(payload);
-            }
-            return messageOrInteraction.reply(payload);
-        } else if (typeof messageOrInteraction.reply === 'function') {
-            return messageOrInteraction.reply(payload);
-        } else if (messageOrInteraction.channel && typeof messageOrInteraction.channel.send === 'function') {
-            return messageOrInteraction.channel.send(payload);
-        }
-    };
-    
-    let message = null;
-    if (messageOrInteraction.attachments) {
-        message = messageOrInteraction;
-    } else if (messageOrInteraction.targetMessage) {
-        message = messageOrInteraction.targetMessage;
-    } else if (messageOrInteraction.client?._selectedMessage) {
-        message = messageOrInteraction.client._selectedMessage;
-    }
-    const contextMessage = messageOrInteraction;
-
-    let typingInterval;
-    if (contextMessage.channel?.sendTyping) {
-        messageOrInteraction.channel.sendTyping().catch(() => {});
-        typingInterval = setInterval(() => messageOrInteraction.channel.sendTyping().catch(() => {}), 8000);
-    }
-
-    try {
-        // --- Image/Video Handling ---
-        let imageURLs = [];
-        if (message && message.attachments.size > 0) {
-            message.attachments.forEach(attachment => {
-                if (attachment.contentType && (attachment.contentType.startsWith('image/') || attachment.contentType.startsWith('video/'))) {
-                    imageURLs.push(attachment.url);
-                }
-            });
-        }
-
-        const urlRegex = /(https?:\/\/[^\s]+)/gi;
-        const matches = [...rawUserMsg.matchAll(urlRegex)];
-        matches.forEach(match => imageURLs.push(match[0]));
-
-        const uniqueImageURLs = [...new Set(imageURLs)].slice(0, 5); 
-        let imageParts = [];
-
-        if (uniqueImageURLs.length > 0) {
-            const partPromises = uniqueImageURLs.map(url => urlToGenerativePart(url));
-            const parts = await Promise.all(partPromises);
-            imageParts = parts.filter(part => part !== null);
-        }
-
-        if (imageParts.length > 0) {
-             if (!promptMsg.trim()) {
-                promptMsg = `Analyze the attached media in the context of the wiki ${WIKI_ENDPOINTS.BASE}`;
-            } else {
-                promptMsg = `Analyze the attached media in the context of: ${promptMsg}`;
-            }
-        }
-
-        // === Instant wiki [[...]] handling and explicit {{...}} detection === 
-        let explicitTemplateName = null;
-        let explicitTemplateContent = null;
-        let explicitTemplateFoundTitle = null;
-        let explicitTemplateGallery = null;
-        const templateMatch = rawUserMsg.match(/\{\{([^{}|]+)(?:\|[^{}]*)?\}\}|\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/);
-
-        let shouldUseComponentsV2 = false;
-        let skipGemini = false;
-        
-        if (templateMatch) {
-            let rawTemplate = (templateMatch[1] || templateMatch[2]).trim();
-            let sectionName = null;
-        
-            if (rawTemplate.includes("#")) {
-                const [page, section] = rawTemplate.split("#");
-                rawTemplate = page.trim();
-                sectionName = section.trim();
-            }
-        
-            const canonical = await findCanonicalTitle(rawTemplate);
-            
-            if (canonical) {
-                shouldUseComponentsV2 = true;
-                skipGemini = true; 
-
-                if (sectionName) {
-                    const sectionData = await getSectionContent(canonical, sectionName);
-                    if (sectionData) {
-                        explicitTemplateContent = sectionData.content;
-                        explicitTemplateFoundTitle = `${canonical} § ${sectionData.displayTitle}`;
-                        explicitTemplateGallery = sectionData.gallery;
-                    } else {
-                        explicitTemplateContent = "No content available.";
-                        explicitTemplateFoundTitle = `${canonical}#${sectionName}`;
-                    }
-                } else {
-                    explicitTemplateContent = await getLeadSection(canonical);
-                    explicitTemplateFoundTitle = canonical;
-                }
-                explicitTemplateName = rawTemplate;
-            } else {
-                console.log(`Pattern found "${rawTemplate}" but no page exists. Falling back to Gemini.`);
-            }
-        }
-
-        let pageTitles = [];
-        let wikiContent = "";
-        
-        if (skipGemini) {
-            if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
-        } else {
-            pageTitles = await askGeminiForPages(rawUserMsg); 
-            if (pageTitles.length) {
-                for (const pageTitle of pageTitles) {
-                    if (knownPages.includes(pageTitle)) { 
-                        const content = await getWikiContent(pageTitle);
-                        if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
-                    }
-                }
-            }
-        }
-
-        const tools = {
-            functionDeclarations: [contributionScoresTool],
-            functions: {
-                "getContributionScores": getContributionScores
-            }
-        };
-        
-        let reply = "";
-        
-        if (!skipGemini) {  
-            reply = await askGemini(
-                promptMsg, 
-                wikiContent || undefined,
-                pageTitles.join(", ") || undefined,
-                imageParts,
-                messageOrInteraction,
-                tools,
-                isProactive
-            );
-        } else {
-            reply = explicitTemplateContent || "I don't know.";
-        }
-
-        if (reply.trim() === "[TERMINATE_MESSAGE]") {
-            if (isInteraction(messageOrInteraction)) {
-                reply = "I cannot reply to that."; 
-            } else {
-                if (typingInterval) clearInterval(typingInterval);
-                return; 
-            }
-        }
-
-        // --- EXTRACT PAGE_EMBEDS ---
-        let parsedReply = reply; 
-        
-        // Find ALL [PAGE_EMBED: ...] tags
-        const embedRegex = /\[PAGE_EMBED:\s*(.*?)\]/gi;
-        const embedMatches = [...parsedReply.matchAll(embedRegex)];
-        let secondaryEmbedTitles = []; 
-
-        if (embedMatches.length > 0) {
-            for (const m of embedMatches) {
-                const requestedPage = m[1].trim();
-                const canonical = await findCanonicalTitle(requestedPage);
-                // Store unique canonical titles
-                if (canonical && !secondaryEmbedTitles.includes(canonical)) {
-                    secondaryEmbedTitles.push(canonical);
-                }
-            }
-            // Remove the tags from the text
-            parsedReply = parsedReply.replace(embedRegex, "").trim();
-        }
-
-        if (isEphemeral) {
-            parsedReply = parsedReply
-  .replace(/\[START_MESSAGE\]/g, "")
-  .replace(/\[END_MESSAGE\]/g, "\n")
-  .replace(/\[PAGE_EMBED:[^\]]*\]/g, "")
-  .trim();
-        }
-
-        let botTaggedChunks = [];
-        let botUsedTags = false;
-
-        if (!isEphemeral) {
-            botTaggedChunks = extractTaggedBotChunks(parsedReply);
-            botUsedTags = botTaggedChunks.length > 0;
-        }
-
-        // Helper to get image for a page
-        const fetchPageImage = async (title) => {
-            if (!title) return null;
-            try {
-                // Remove fragment for image lookup if present
-                const cleanTitle = title.includes(" § ") ? title.split(" § ")[0] : title.split("#")[0];
-                const imageRes = await fetch(`${API}?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=pageimages&pithumbsize=512&format=json`);
-                const imageJson = await imageRes.json();
-                const pages = imageJson.query?.pages;
-                const first = pages ? Object.values(pages)[0] : null;
-                const src = first?.thumbnail?.source || null;
-                return getFullSizeImageUrl(src);
-            } catch (err) {
-                return null;
-            }
-        }
-
-        // Prepare Image for V2 (Primary User Request)
-        let primaryImageUrl = null;
-        if (explicitTemplateFoundTitle) {
-            primaryImageUrl = await fetchPageImage(explicitTemplateFoundTitle);
-        }
-
-        let sent = false;
-        
-        // -------------------- COMPONENTS V2 (User Triggered {{Page}}) --------------------
-        if (shouldUseComponentsV2) {
-            try {
-                const container = buildPageEmbed(
-                    explicitTemplateFoundTitle, 
-                    parsedReply, // For explicit user trigger, the 'reply' IS the content (extracted text)
-                    primaryImageUrl,
-                    explicitTemplateGallery
-                );
-                
-                if (container.components && container.components.length > 0) {
-                    const replyOptions = {
-                        components: [container],
-                        flags: MessageFlags.IsComponentsV2,
-                        allowedMentions: { repliedUser: false },
-                    };
-                    await smartReply(replyOptions);
-                    sent = true;
-                }
-            } catch (v2err) {
-                console.warn("Components V2 attempt failed — falling back to plain text.", v2err);
-            }
-        }
-        
-        // -------------------- STANDARD TEXT REPLY --------------------
-        if (!sent && !shouldUseComponentsV2) {
-            if (botUsedTags) {
-                const replyOptions = { allowedMentions: { repliedUser: false } };
-                (async () => {
-                    // FIX: Iterate through chunks and SPLIT specific chunks if they are too long
-                    while (botTaggedChunks.length > 0) {
-                        const rawChunk = botTaggedChunks.shift();
-                        // Apply splitMessage to the chunk in case the chunk itself is huge
-                        const splitParts = splitMessage(rawChunk);
-
-                        for (const part of splitParts) {
-                            if (!sent) {
-                                await smartReply({ ...replyOptions, content: part });
-                                sent = true; 
-                            } else {
-                                const delay = 1000 + Math.floor(Math.random() * 2000);
-                                await new Promise(r => setTimeout(r, delay));
-                                if (messageOrInteraction.channel) {
-                                     await messageOrInteraction.channel.send({ ...replyOptions, content: part });
-                                }
-                            }
-                        }
-                    }
-                })();
-            } else {
-                const replyParts = splitMessage(parsedReply, DISCORD_MAX_LENGTH);
-                for (const [index, part] of replyParts.entries()) {
-                    const fallbackOptions = { content: part, allowedMentions: { repliedUser: false } };
-                    if (index === 0) {
-                        await smartReply(fallbackOptions);
-                    } else {
-                        if (isInteraction(messageOrInteraction)) {
-                            await messageOrInteraction.followUp(fallbackOptions);
-                        } else {
-                            await messageOrInteraction.channel.send(fallbackOptions);
-                        }
-                    }
-                }
-            }
-            sent = true;
-        }
-        
-        // V2 Fallback (Should rarely happen)
-        if (!sent && shouldUseComponentsV2) {
-            const rawFallback = explicitTemplateContent || parsedReply;
-            const fallbackParts = splitMessage(rawFallback, DISCORD_MAX_LENGTH);
-            
-            for (const [index, part] of fallbackParts.entries()) {
-                const opts = { content: part, allowedMentions: { repliedUser: false } };
-                if (index === 0) await smartReply(opts);
-                else if (messageOrInteraction.channel) await messageOrInteraction.channel.send(opts);
-            }
-        }
-        
-        // -------------------- SECONDARY EMBEDS (AI Triggered [PAGE_EMBED]) --------------------
-        // We wait for the main text to finish sending/chunking before sending embeds?
-        // Since the chunking is async/separate, we can just fire these off.
-        if (secondaryEmbedTitles.length > 0) {
-            // Small delay to ensure main text appears first
-            await new Promise(r => setTimeout(r, 500)); 
-
-            for (const title of secondaryEmbedTitles) {
-                try {
-                    // 1. Fetch content (Lead section)
-                    let wikiAbstract = null;
-                    let gallery = null;
-                    let displayTitle = title;
-
-                    if (title.includes("#")) {
-                        const [page, section] = title.split("#");
-                        const sectionData = await getSectionContent(page.trim(), section.trim());
-                        if (sectionData) {
-                            wikiAbstract = sectionData.content;
-                            displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
-                            gallery = sectionData.gallery;
-                        }
-                    } else {
-                        wikiAbstract = await getLeadSection(title);
-                    }
-
-                    if (!wikiAbstract) wikiAbstract = "No content available.";
-                    
-                    if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
-
-                    // 2. Fetch Image
-                    const cardImageUrl = await fetchPageImage(title);
-
-                    // 3. Build Container using SHARED function
-                    const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, gallery);
-
-                    // 4. Send
-                    const embedPayload = {
-                        components: [container],
-                        flags: MessageFlags.IsComponentsV2,
-                        allowedMentions: { repliedUser: false }
-                    };
-
-                    if (isInteraction(messageOrInteraction)) {
-                        await messageOrInteraction.followUp(embedPayload);
-                    } else if (messageOrInteraction.channel) {
-                        await messageOrInteraction.channel.send(embedPayload);
-                    }
-                    
-                    // Delay between multiple cards
-                    await new Promise(r => setTimeout(r, 500));
-
-                } catch (secErr) {
-                    console.error(`Failed to send secondary page embed for ${title}:`, secErr);
-                }
-            }
-        }
-
-    } catch (err) {
-        const isUnknownMessage = err.code === 10008 || (err.code === 50035 && String(err.message).includes("Unknown message"));
-        if (isUnknownMessage) return;
-        console.error("Error handling request:", err);
-        try {
-            await smartReply({ content: MESSAGES.processingError, ephemeral: true });
-        } catch (finalErr) {}
-    } finally {
-        if (typingInterval) clearInterval(typingInterval);
-    }
-}
-
 // -------------------- EVENTS --------------------
+function getWikiAndPage(messageContent, channelParentId) {
+    const match = messageContent.match(syntaxRegex);
+    if (!match) return null;
+
+    const prefix = (match[1] || match[3])?.toLowerCase();
+    const rawPageName = (match[2] || match[4]).trim();
+
+    let wikiConfig = null;
+    if (prefix) {
+        wikiConfig = WIKIS[PREFIX_WIKI_MAP[prefix]];
+    } else {
+        const wikiKey = CATEGORY_WIKI_MAP[channelParentId] || "tagging";
+        wikiConfig = WIKIS[wikiKey];
+    }
+
+    return { wikiConfig, rawPageName };
+}
+
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
@@ -704,7 +175,7 @@ client.on("messageCreate", async (message) => {
         const lowerName = message.channel.name.toLowerCase();
         if (IGNORED_CHANNELS.some(blocked => lowerName.includes(blocked))) return;
     }
-    
+
     logMessage(
         message.channel.id,
         message.author.username,
@@ -712,9 +183,28 @@ client.on("messageCreate", async (message) => {
         message.createdTimestamp 
     );
 
-    let rawUserMsg = message.content.trim(); 
-    let promptMsg = rawUserMsg;              
-    
+    const wikiKey = CATEGORY_WIKI_MAP[message.channel.parentId] || "tagging";
+    const defaultWikiConfig = WIKIS[wikiKey];
+
+    let wikiHandled = false;
+    const res = getWikiAndPage(message.content, message.channel.parentId);
+    if (res) {
+        const { wikiConfig, rawPageName } = res;
+        if (wikiConfig) {
+            const response = await handleWikiRequest(wikiConfig, rawPageName, message);
+            if (response && response.id) {
+                responseMap.set(message.id, response.id);
+                botToAuthorMap.set(response.id, message.author.id);
+                pruneMap(responseMap);
+                pruneMap(botToAuthorMap);
+                wikiHandled = true;
+            }
+        }
+    }
+
+    // AI Logic
+    let rawUserMsg = message.content.trim();
+    let promptMsg = rawUserMsg;
     if (!rawUserMsg) return;
 
     const isDM = !message.guild;
@@ -728,7 +218,7 @@ client.on("messageCreate", async (message) => {
             keywordTriggered = true;
         }
     }
-    
+
     let isReply = false;
     if (message.reference) {
         try {
@@ -737,12 +227,10 @@ client.on("messageCreate", async (message) => {
         } catch {}
     }
 
-    const hasWikiSyntax = /\{\{[^{}]+\}\}|\[\[[^[\]]+\]\]/.test(message.content);
+    if (!(isDM || mentioned || isReply || keywordTriggered)) return;
 
-    if (!(isDM || mentioned || isReply || hasWikiSyntax || keywordTriggered)) return;
+    if (wikiHandled) await new Promise(r => setTimeout(r, 1000));
 
-    const cleanContent = rawUserMsg.replace(/<@!?\d+>/g, "").trim();
-    
     if (message.reference) {
         try {
             const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
@@ -753,14 +241,13 @@ client.on("messageCreate", async (message) => {
         } catch (err) {
             console.error("Failed to fetch reply context:", err);
         }
-    } 
-    else if (message.attachments.size === 0 && !rawUserMsg.match(/(https?:\/\/[^\s]+)/g)) {
+    } else {
         try {
             const pastMessages = await message.channel.messages.fetch({ limit: 15, before: message.id });
             const lastHumanMessages = pastMessages
                 .filter(m => !m.author.bot && m.content.trim().length > 0)
-                .first(5) 
-                .reverse(); 
+                .first(5)
+                .reverse();
 
             if (lastHumanMessages.length > 0) {
                 const contextLog = lastHumanMessages
@@ -773,86 +260,97 @@ client.on("messageCreate", async (message) => {
             console.error("Failed to fetch channel context:", err);
         }
     }
-    
-    if (cleanContent.length < 12 && !message.reference && message.channel.type !== ChannelType.DM && !rawUserMsg.includes("[SYSTEM:")) {
+
+    await handleAIRequest(promptMsg, rawUserMsg, message, defaultWikiConfig);
+
+    if (isDM || mentioned || isReply) {
+        scheduleFollowUp(message, defaultWikiConfig);
+    }
+});
+
+client.on("messageUpdate", async (oldMessage, newMessage) => {
+    if (newMessage.partial) {
         try {
-            const messages = await message.channel.messages.fetch({ limit: 2 });
-            if (messages.size === 2) {
-                const previousMessage = messages.last(); 
-                if (previousMessage && !previousMessage.author.bot && previousMessage.content) {
-                    promptMsg = `${previousMessage.content}\n\n[System Note: User pinged you regarding the text above]`;
-                }
-            }
+            await newMessage.fetch();
         } catch (err) {
-            console.error("Failed to fetch previous context:", err);
+            console.warn("Failed to fetch updated message:", err.message);
+            return;
         }
     }
 
-    await handleUserRequest(promptMsg, rawUserMsg, message);
+    if (oldMessage.partial) {
+        try {
+            await oldMessage.fetch();
+        } catch (err) {
+            console.warn("Failed to fetch old message content for update comparison:", err.message);
+        }
+    }
 
-    if (isDM || mentioned || isReply) {
-        scheduleFollowUp(message);
+    if (newMessage.author?.bot) return;
+    if (oldMessage.content === newMessage.content) return;
+    if (!responseMap.has(newMessage.id)) return;
+
+    const res = getWikiAndPage(newMessage.content, newMessage.channel.parentId);
+    if (!res) return;
+
+    const { wikiConfig, rawPageName } = res;
+    const botMessageId = responseMap.get(newMessage.id);
+
+    try {
+        const botMessage = await newMessage.channel.messages.fetch(botMessageId);
+        if (botMessage) {
+            const response = await handleWikiRequest(wikiConfig, rawPageName, newMessage, botMessage);
+            if (response && response.id) {
+                botToAuthorMap.set(response.id, newMessage.author.id);
+                pruneMap(botToAuthorMap);
+            }
+        }
+    } catch (err) {
+        console.warn("Failed to fetch bot message for update:", err.message);
     }
 });
 
-client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isMessageContextMenuCommand()) return;
-    if (interaction.commandName !== `Ask ${BOT_NAME}...`) return;
+client.on("messageReactionAdd", async (reaction, user) => {
+    if (user.bot) return;
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+        } catch (error) {
+            console.error('Something went wrong when fetching the reaction:', error);
+            return;
+        }
+    }
 
-    logMessage(
-        interaction.channelId,
-        interaction.user.username,
-        interaction.targetMessage?.content || "[No content]",
-        interaction.createdTimestamp 
-    );
-    
-    const modal = new ModalBuilder()
-        .setCustomId("deriv_modal")
-        .setTitle(`Ask ${BOT_NAME}`);
+    const emoji = reaction.emoji.name;
+    const valid = new Set(["🗑️", "wastebasket"]);
+    if (valid.has(emoji)) {
+        const message = reaction.message;
+        if (message.author.id !== client.user.id) return;
 
-    const textInput = new TextInputBuilder()
-        .setCustomId("user_question")
-        .setLabel("What should I do with this message?")
-        .setPlaceholder("e.g., 'Summarize this message...' or leave blank")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(false);
+        let originalAuthorId = botToAuthorMap.get(message.id);
 
-    const row = new ActionRowBuilder().addComponents(textInput);
-    modal.addComponents(row);
+        if (!originalAuthorId && message.reference) {
+            try {
+                const referencedMsg = await message.channel.messages.fetch(message.reference.messageId);
+                originalAuthorId = referencedMsg.author.id;
+                botToAuthorMap.set(message.id, originalAuthorId);
+            } catch (err) {
+                console.warn(`Failed to fetch referenced message ${message.reference.messageId} for bot message ${message.id}:`, err);
+            }
+        }
 
-    await interaction.showModal(modal);
-    interaction.client._selectedMessage = interaction.targetMessage;
+        if (user.id === originalAuthorId) {
+            try {
+                await message.delete();
+            } catch (err) {
+                console.warn("Failed to delete message on reaction:", err.message);
+            }
+        }
+    }
 });
 
-client.on("interactionCreate", async (interaction) => {
-    if (interaction.type !== InteractionType.ModalSubmit) return;
-    if (interaction.customId !== "deriv_modal") return;
-
-    let question = interaction.fields.getTextInputValue("user_question");
-    const message = interaction.client._selectedMessage;
-
-    if (!message) {
-        return interaction.reply({ content: "Could not find the original message.", ephemeral: true });
-    }
-
-    if (!question || question.trim() === "") {
-        question = "Please analyze and respond to the following message content based on the system instructions.";
-    }
-
-    const userPrompt = `${question}\n\nMessage content:\n"${message.content}"`;
-
-    logMessage(
-        interaction.channelId,
-        interaction.user.username,
-        userPrompt,
-        interaction.createdTimestamp
-    );
-    
-    const isPrivateChannel = interaction.channel && (interaction.channel.type === ChannelType.DM || interaction.channel.type === ChannelType.GroupDM);
-    const ephemeralSetting = !isPrivateChannel;
-
-    await interaction.deferReply({ ephemeral: ephemeralSetting });
-    await handleUserRequest(userPrompt, userPrompt, interaction, true);
+client.on("interactionCreate", (interaction) => {
+    handleInteraction(interaction).catch(err => console.error("Interaction error:", err));
 });
 
 client.login(DISCORD_TOKEN);

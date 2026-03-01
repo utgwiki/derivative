@@ -1,11 +1,10 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
-const { performSearch, getWikiContent, findCanonicalTitle, knownPages } = require("./parse_page.js");
-const { getSystemInstruction, BOT_NAME, GEMINI_MODEL } = require("../config.js");
+const { performSearch, getWikiContent, findCanonicalTitle, knownPagesByWiki } = require("./parse_page.js");
+const { getSystemInstruction, BOT_NAME, GEMINI_MODEL, WIKIS, CATEGORY_WIKI_MAP } = require("../config.js");
 
-// node-fetch
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const { fetch } = require("./utils.js");
 
 // Dynamic import for Gemini with deduplicated initialization
 const geminiClients = new Map();
@@ -132,10 +131,16 @@ function extractText(result) {
 }
 
 // Page selection Gemini (uses GEMINI_PAGE_KEY)
-async function askGeminiForPages(userInput) {
+async function askGeminiForPages(userInput, wikiConfig) {
+    if (!wikiConfig) return [];
     const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
+
+    // Use wiki key directly from config
+    const wikiKey = wikiConfig.key || "tagging";
+    const wikiPages = knownPagesByWiki.get(wikiKey) || [];
+
     const prompt = `User asked: "${userInput}"
-From this wiki page list: ${knownPages.join(", ")}
+From this wiki page list: ${wikiPages.join(", ")}
 Pick up to at least 5 relevant page titles that best match the request. 
 Return only the exact page titles, one per line.
 If none are relevant, return "NONE".`;
@@ -147,7 +152,6 @@ If none are relevant, return "NONE".`;
             config: { maxOutputTokens: 100 },
         });
         const text = extractText(result);
-        console.log(text);
         if (!text || text === "NONE") return [];
         return [...new Set(
             text.split("\n")
@@ -155,7 +159,7 @@ If none are relevant, return "NONE".`;
             .filter(Boolean)
         )].slice(0, 5);
     } catch (err) {
-        console.error(`Gemini page selection error for ${BOT_NAME}: `, err);
+        console.error(`Gemini page selection error for ${BOT_NAME} on wiki ${wikiKey}: `, err);
         return [];
     }
 }
@@ -189,8 +193,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
     const currentTimestamp = message?.createdTimestamp || Date.now();
     const timeStr = formatTime(currentTimestamp);
 
+    // Resolve wiki configuration for instructions
+    const parentId = message?.channel?.parentId || null;
+    let wikiKey = CATEGORY_WIKI_MAP[parentId] || "tagging";
+    if (!WIKIS[wikiKey]) wikiKey = "tagging";
+    const wikiConfig = WIKIS[wikiKey];
+
     // 1. Build Initial System Prompt
-    let sysInstr = getSystemInstruction();
+    let sysInstr = getSystemInstruction(wikiConfig);
     
     if (wikiContent && pageTitle) {
         sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
@@ -302,7 +312,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 if (searchMatch) {
                     const query = searchMatch[1].trim();
                     console.log(`[Tool] Searching for: ${query}`);
-                    const searchResults = await performSearch(query);
+                    const searchResults = await performSearch(query, wikiConfig);
                     currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
                     continue; 
                 }
@@ -311,8 +321,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 if (contentMatch) {
                     const requestedTitle = contentMatch[1].trim();
                     console.log(`[Tool] Fetching content for: ${requestedTitle}`);
-                    const canonical = await findCanonicalTitle(requestedTitle) || requestedTitle;
-                    const content = await getWikiContent(canonical);
+                    const canonical = await findCanonicalTitle(requestedTitle, wikiConfig) || requestedTitle;
+                    const content = await getWikiContent(canonical, wikiConfig);
                     
                     const resultText = content 
                         ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
