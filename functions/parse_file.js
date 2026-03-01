@@ -1,5 +1,6 @@
 const { fetch } = require("./utils.js");
 const { MessageFlags } = require("discord.js");
+const { BOT_NAME } = require("../config.js");
 
 async function handleFileRequest(wikiConfig, fileName, messageOrInteraction) {
     const isInteraction = (interaction) => interaction && (interaction.editReply || interaction.followUp);
@@ -33,7 +34,8 @@ async function handleFileRequest(wikiConfig, fileName, messageOrInteraction) {
         });
 
         const res = await fetch(`${wikiConfig.apiEndpoint}?${params.toString()}`, {
-            signal: controller.signal
+            signal: controller.signal,
+            headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
         });
 
         if (!res.ok) {

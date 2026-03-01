@@ -14,7 +14,7 @@ const {
 } = require("./conversation.js");
 const { buildPageEmbed } = require("./interactions.js");
 const { fetch } = require("./utils.js");
-const { BOT_NAME } = require("../config.js");
+const { BOT_NAME, WIKIS } = require("../config.js");
 const { MessageFlags } = require("discord.js");
 
 const DISCORD_MAX_LENGTH = 2000;
@@ -65,7 +65,14 @@ function extractTaggedBotChunks(text) {
 
 async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wikiConfig, isEphemeral = false, isProactive = false) {
     const rawUserMsgSafe = (rawUserMsg || '').toString();
-    const wikiConfigSafe = Object.assign({ baseUrl: '' }, wikiConfig || {});
+    const wikiConfigSafe = Object.assign({ baseUrl: '', apiEndpoint: '', articlePath: '' }, wikiConfig || {});
+    if (!wikiConfigSafe.apiEndpoint && wikiConfigSafe.baseUrl) {
+        const key = Object.keys(WIKIS).find(k => WIKIS[k].baseUrl === wikiConfigSafe.baseUrl);
+        if (key) {
+            wikiConfigSafe.apiEndpoint = WIKIS[key].apiEndpoint;
+            if (!wikiConfigSafe.articlePath) wikiConfigSafe.articlePath = WIKIS[key].articlePath;
+        }
+    }
 
     if (!promptMsg || !promptMsg.trim()) return MESSAGES.noAIResponse;
 
@@ -188,14 +195,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 sectionName = section.trim();
             }
 
-            const canonical = await findCanonicalTitle(rawTemplate, wikiConfig);
+            const canonical = await findCanonicalTitle(rawTemplate, wikiConfigSafe);
 
             if (canonical) {
                 shouldUseComponentsV2 = true;
                 skipGemini = true;
 
                 if (sectionName) {
-                    const sectionData = await getSectionContent(canonical, sectionName, wikiConfig);
+                    const sectionData = await getSectionContent(canonical, sectionName, wikiConfigSafe);
                     if (sectionData) {
                         explicitTemplateContent = sectionData.content;
                         explicitTemplateFoundTitle = `${canonical} § ${sectionData.displayTitle}`;
@@ -205,7 +212,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         explicitTemplateFoundTitle = `${canonical}#${sectionName}`;
                     }
                 } else {
-                    explicitTemplateContent = await getLeadSection(canonical, wikiConfig);
+                    explicitTemplateContent = await getLeadSection(canonical, wikiConfigSafe);
                     explicitTemplateFoundTitle = canonical;
                 }
                 explicitTemplateName = rawTemplate;
@@ -218,10 +225,10 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (skipGemini) {
             if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
         } else {
-            pageTitles = await askGeminiForPages(rawUserMsgSafe, wikiConfig);
+            pageTitles = await askGeminiForPages(rawUserMsgSafe, wikiConfigSafe);
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
-                    const content = await getWikiContent(pageTitle, wikiConfig);
+                    const content = await getWikiContent(pageTitle, wikiConfigSafe);
                     if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
                 }
             }
@@ -231,7 +238,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             functionDeclarations: [contributionScoresTool],
             functions: {
                 "getContributionScores": async () => {
-                    const result = await getContributionScores(wikiConfig);
+                    const result = await getContributionScores(wikiConfigSafe);
                     if (result.error) return { error: result.error };
                     return { result: result.result };
                 }
@@ -271,7 +278,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (embedMatches.length > 0) {
             for (const m of embedMatches) {
                 const requestedPage = m[1].trim();
-                const canonical = await findCanonicalTitle(requestedPage, wikiConfig);
+                const canonical = await findCanonicalTitle(requestedPage, wikiConfigSafe);
                 if (canonical && !secondaryEmbedTitles.includes(canonical)) {
                     secondaryEmbedTitles.push(canonical);
                 }
@@ -296,13 +303,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         }
 
         const fetchPageImage = async (title) => {
-            if (!title) return null;
+            if (!title || !wikiConfigSafe.apiEndpoint) return null;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 3000);
             try {
                 const cleanTitle = title.includes(" § ") ? title.split(" § ")[0] : title.split("#")[0];
-                const imageRes = await fetch(`${wikiConfig.apiEndpoint}?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=pageimages&pithumbsize=512&format=json`, {
-                    signal: controller.signal
+                const imageRes = await fetch(`${wikiConfigSafe.apiEndpoint}?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=pageimages&pithumbsize=512&format=json`, {
+                    signal: controller.signal,
+                    headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
                 });
 
                 if (!imageRes.ok) throw new Error(`HTTP error! status: ${imageRes.status}`);
@@ -337,7 +345,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     explicitTemplateFoundTitle,
                     parsedReply,
                     primaryImageUrl,
-                    wikiConfig,
+                    wikiConfigSafe,
                     explicitTemplateGallery
                 );
 
@@ -416,21 +424,21 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
                     if (title.includes("#")) {
                         const [page, section] = title.split("#");
-                        const sectionData = await getSectionContent(page.trim(), section.trim(), wikiConfig);
+                        const sectionData = await getSectionContent(page.trim(), section.trim(), wikiConfigSafe);
                         if (sectionData) {
                             wikiAbstract = sectionData.content;
                             displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
                             gallery = sectionData.gallery;
                         }
                     } else {
-                        wikiAbstract = await getLeadSection(title, wikiConfig);
+                        wikiAbstract = await getLeadSection(title, wikiConfigSafe);
                     }
 
                     if (!wikiAbstract) wikiAbstract = "No content available.";
                     if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
 
                     const cardImageUrl = await fetchPageImage(title);
-                    const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfig, gallery);
+                    const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfigSafe, gallery);
 
                     const embedPayload = {
                         components: [container],
@@ -451,7 +459,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                             const [baseTitle, frag] = title.split("#");
                             const cleanBase = baseTitle.replace(/ /g, "_");
                             const anchor = frag ? `#${encodeURIComponent(frag.replace(/ /g, "_"))}` : "";
-                            const safeUrl = `${wikiConfig.articlePath}${encodeURIComponent(cleanBase)}${anchor}`;
+                            const safeUrl = `${wikiConfigSafe.articlePath}${encodeURIComponent(cleanBase)}${anchor}`;
 
                             await messageOrInteraction.channel.send({
                                 content: `[**${displayTitle}**](<${safeUrl}>)\n${wikiAbstract}`

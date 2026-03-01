@@ -12,6 +12,8 @@ const {
     BOT_NAME
 } = require("../config.js");
 const { fetch } = require("./utils.js");
+const { logMessage } = require("../memory.js");
+const { handleAIRequest } = require("./ai_handler.js");
 
 const {
     ContainerBuilder,
@@ -25,7 +27,8 @@ const {
     MessageFlags,
     ModalBuilder,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
+    ChannelType
 } = require("discord.js");
 
 const responseMap = new Map();
@@ -395,10 +398,6 @@ async function handleInteraction(interaction) {
 
         const targetMessageId = modalId.replace("deriv_modal_", "");
         let question = interaction.fields.getTextInputValue("user_question");
-
-        const { logMessage } = require("../memory.js");
-        const { handleAIRequest } = require("./ai_handler.js");
-        const { ChannelType } = require("discord.js");
 
         let message;
         try {

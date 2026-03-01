@@ -1,4 +1,5 @@
 const { fetch } = require("./utils.js");
+const { BOT_NAME } = require("../config.js");
 
 async function urlToGenerativePart(url) {
     try {
@@ -14,7 +15,9 @@ async function urlToGenerativePart(url) {
         }
 
         // Image logic
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
+        });
         const contentType = response.headers.get("Content-Type");
         const urlIsImage = /\.(jpe?g|png|gif|webp)/i.test(url);
 
