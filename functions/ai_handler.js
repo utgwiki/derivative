@@ -105,9 +105,9 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             console.error(`Failed to fetch message ${targetMessageId} for modal interaction:`, err.message);
             const errorMsg = "Could not retrieve the original message context. The request is being aborted.";
             if (isInteraction(messageOrInteraction)) {
-                await messageOrInteraction.reply({ content: errorMsg, ephemeral: true });
+                await messageOrInteraction.reply({ content: errorMsg, ephemeral: true }).catch(e => console.error("Recovery reply failed:", e));
             } else {
-                await messageOrInteraction.reply({ content: errorMsg });
+                await messageOrInteraction.reply({ content: errorMsg }).catch(e => console.error("Recovery reply failed:", e));
             }
             return;
         }
@@ -442,8 +442,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                             await messageOrInteraction.channel.send(sanitizedEmbedPayload);
                         } catch (err) {
                             console.warn("Failed to send secondary embed components to channel, falling back to content-only:", err.message);
+
+                            const [baseTitle, frag] = title.split("#");
+                            const cleanBase = baseTitle.replace(/ /g, "_");
+                            const anchor = frag ? `#${encodeURIComponent(frag.replace(/ /g, "_"))}` : "";
+                            const safeUrl = `${wikiConfig.articlePath}${encodeURIComponent(cleanBase)}${anchor}`;
+
                             await messageOrInteraction.channel.send({
-                                content: `[**${displayTitle}**](<${wikiConfig.articlePath}${encodeURIComponent(title.replace(/ /g, "_"))}>)\n${wikiAbstract}`
+                                content: `[**${displayTitle}**](<${safeUrl}>)\n${wikiAbstract}`
                             });
                         }
                     }
@@ -459,8 +465,10 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
     } catch (err) {
         console.error("Error handling AI request:", err);
         try {
-            await smartReply({ content: MESSAGES.processingError, ephemeral: true });
-        } catch (finalErr) {}
+            await smartReply({ content: MESSAGES.processingError, ephemeral: true }).catch(finalErr => console.error("Error recovery failed:", finalErr));
+        } catch (finalErr) {
+             console.error("Error recovery failed (outer):", finalErr);
+        }
     } finally {
         if (typingInterval) clearInterval(typingInterval);
     }

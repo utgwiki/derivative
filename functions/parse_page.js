@@ -1,4 +1,5 @@
-const { fetch, resolveWikiKey } = require("./utils.js");
+const { fetch } = require("./utils.js");
+const { WIKIS } = require("../config.js");
 const cheerio = require('cheerio');
 
 let knownPagesByWiki = new Map();
@@ -125,11 +126,9 @@ function htmlToMarkdown(html, baseUrl) {
 async function findCanonicalTitle(input, wikiConfig) {
     if (!input) return null;
     const raw = String(input).trim();
+    const wikiKey = wikiConfig.key || "tagging";
 
-    const { WIKIS } = require("../config.js");
-    const wikiKey = resolveWikiKey(wikiConfig.baseUrl, WIKIS);
-
-    if (wikiKey && pageLookupByWiki.has(wikiKey)) {
+    if (pageLookupByWiki.has(wikiKey)) {
         const lookup = pageLookupByWiki.get(wikiKey);
         if (lookup.has(raw.toLowerCase())) return lookup.get(raw.toLowerCase());
     }
@@ -409,7 +408,6 @@ async function getAllPages(wikiConfig) {
 
 async function loadPages() {
     try {
-        const { WIKIS } = require("../config.js");
         knownPagesByWiki.clear();
         pageLookupByWiki.clear();
         knownPages.length = 0;

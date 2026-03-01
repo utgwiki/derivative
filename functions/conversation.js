@@ -3,7 +3,6 @@ const { MAIN_KEYS } = require("../geminikey.js");
 const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
 const { performSearch, getWikiContent, findCanonicalTitle, knownPagesByWiki } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL, WIKIS, CATEGORY_WIKI_MAP } = require("../config.js");
-const { resolveWikiKey } = require("./utils.js");
 
 // node-fetch
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -134,10 +133,11 @@ function extractText(result) {
 
 // Page selection Gemini (uses GEMINI_PAGE_KEY)
 async function askGeminiForPages(userInput, wikiConfig) {
+    if (!wikiConfig) return [];
     const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
 
-    // Resolve per-wiki page list if available
-    const wikiKey = resolveWikiKey(wikiConfig.baseUrl, WIKIS);
+    // Use wiki key directly from config
+    const wikiKey = wikiConfig.key || "tagging";
     const wikiPages = knownPagesByWiki.get(wikiKey) || [];
 
     const prompt = `User asked: "${userInput}"
@@ -160,7 +160,7 @@ If none are relevant, return "NONE".`;
             .filter(Boolean)
         )].slice(0, 5);
     } catch (err) {
-        console.error(`Gemini page selection error for ${BOT_NAME}: `, err);
+        console.error(`Gemini page selection error for ${BOT_NAME} on wiki ${wikiKey}: `, err);
         return [];
     }
 }

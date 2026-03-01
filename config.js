@@ -3,6 +3,7 @@ const BOT_NAME = "Derivative";
 
 const WIKIS = {
     "tagging": {
+        key: "tagging",
         name: "Untitled Tag Game",
         baseUrl: "https://tagging.wiki",
         apiEndpoint: "https://tagging.wiki/w/api.php",
@@ -11,6 +12,7 @@ const WIKIS = {
         emoji: "1472436401680158741"
     },
     "farm": {
+        key: "farm",
         name: "Farm",
         baseUrl: "https://farm.miraheze.org",
         apiEndpoint: "https://farm.miraheze.org/w/api.php",
@@ -63,6 +65,10 @@ function getSystemInstruction(wikiConfig) {
         wikiConfig = WIKIS.tagging;
     }
 
+    const GAME_TOPIC = wikiConfig.name || "Untitled Tag Game";
+    const WIKI_BASE_URL = wikiConfig.baseUrl || "https://tagging.wiki";
+    const ARTICLE_PATH = wikiConfig.articlePath || "https://tagging.wiki/wiki/";
+
     const now = new Date();
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -74,10 +80,6 @@ function getSystemInstruction(wikiConfig) {
     let previousMonthIndex = currentMonthIndex === 0 ? 11 : currentMonthIndex - 1;
     let previousMonthYear = currentMonthIndex === 0 ? currentYear - 1 : currentYear;
     const previousMonth = monthNames[previousMonthIndex];
-
-    const GAME_TOPIC = wikiConfig.name || "Untitled Tag Game";
-    const WIKI_BASE_URL = wikiConfig.baseUrl || "https://tagging.wiki";
-    const ARTICLE_PATH = wikiConfig.articlePath || "https://tagging.wiki/wiki/";
 
     return `You are ${BOT_NAME}, nickname Deriv, a friend from the Roblox game ${GAME_TOPIC}.
 Never mention Gemini, AI, or your true identity.
