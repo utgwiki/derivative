@@ -18,7 +18,6 @@ app.get('/', (req, res) => {
         <h1>Derivative Discord Bot</h1>
         <p>Bot is running and ready to chat!</p>
         <p>Invite the bot to your Discord server to start using it.</p>
-                <p>Please visit <a href="https://shitheads.instatus.com"><b>shitheads.instatus.com</b></a> instead. Why are you here, actually?</p>
       </body>
     </html>
   `);
@@ -27,7 +26,7 @@ app.get('/', (req, res) => {
 app.get('/status', (req, res) => {
   res.json({
     status: 'online',
-    bot: 'Garfield Discord Bot',
+    bot: 'Derivative Discord Bot',
     timestamp: new Date().toISOString()
   });
 });
