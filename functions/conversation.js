@@ -78,7 +78,14 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
 }
 
 function persistConversationTurns(channelId, userTurn, modelTurn) {
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    if (!chatHistories.has(channelId)) {
+        // Prune older channels if we exceed 500 channels
+        if (chatHistories.size >= 500) {
+            const firstKey = chatHistories.keys().next().value;
+            chatHistories.delete(firstKey);
+        }
+        chatHistories.set(channelId, []);
+    }
     const history = chatHistories.get(channelId);
 
     const strippedUserText = stripSystemMessages(userTurn.text);
@@ -102,6 +109,11 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
             role,
             parts: [{ text: fullText }]
         });
+
+        // Limit to 30 history entries per channel
+        if (history.length > 30) {
+            chatHistories.set(channelId, history.slice(-30));
+        }
 
         logs.push({
             memberName: username || role.toUpperCase(),
@@ -373,4 +385,10 @@ function getHistory(channelId) {
     return chatHistories.get(channelId) || [];
 }
 
-module.exports = { askGemini, askGeminiForPages, MESSAGES, getHistory };
+module.exports = {
+    askGemini,
+    askGeminiForPages,
+    MESSAGES,
+    getHistory,
+    persistConversationTurns
+};

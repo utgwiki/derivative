@@ -21,10 +21,13 @@ const {
 } = require("discord.js");
 
 const { WIKIS, CATEGORY_WIKI_MAP, STATUS_INTERVAL_MS, BOT_NAME, BOT_SETTINGS } = require("./config.js");
-const { logMessage } = require("./memory.js");
+const { logMessage, loadMemory } = require("./memory.js");
 const {
     getHistory
 } = require("./functions/conversation.js");
+
+// Initialize memory from disk
+loadMemory();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const {
@@ -334,6 +337,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
                 const referencedMsg = await message.channel.messages.fetch(message.reference.messageId);
                 originalAuthorId = referencedMsg.author.id;
                 botToAuthorMap.set(message.id, originalAuthorId);
+                pruneMap(botToAuthorMap);
             } catch (err) {
                 console.warn(`Failed to fetch referenced message ${message.reference.messageId} for bot message ${message.id}:`, err);
             }
