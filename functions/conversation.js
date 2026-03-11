@@ -78,7 +78,9 @@ for (const [channelId, historyArray] of Object.entries(persistedMemory)) {
 }
 
 function persistConversationTurns(channelId, userTurn, modelTurn) {
-    if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
+    if (!chatHistories.has(channelId)) {
+        chatHistories.set(channelId, []);
+    }
     const history = chatHistories.get(channelId);
 
     const strippedUserText = stripSystemMessages(userTurn.text);
@@ -373,4 +375,9 @@ function getHistory(channelId) {
     return chatHistories.get(channelId) || [];
 }
 
-module.exports = { askGemini, askGeminiForPages, MESSAGES, getHistory };
+module.exports = {
+    askGemini,
+    askGeminiForPages,
+    MESSAGES,
+    getHistory
+};

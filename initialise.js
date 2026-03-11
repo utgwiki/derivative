@@ -1,5 +1,9 @@
 require("dotenv").config();
 
+const { loadMemory } = require("./memory.js");
+// Initialize memory from disk before other modules are loaded
+loadMemory();
+
 const { setRandomStatus } = require("./functions/presence.js");
 const { commands } = require("./functions/commands.js");
 const { 
@@ -334,6 +338,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
                 const referencedMsg = await message.channel.messages.fetch(message.reference.messageId);
                 originalAuthorId = referencedMsg.author.id;
                 botToAuthorMap.set(message.id, originalAuthorId);
+                pruneMap(botToAuthorMap);
             } catch (err) {
                 console.warn(`Failed to fetch referenced message ${message.reference.messageId} for bot message ${message.id}:`, err);
             }

@@ -60,8 +60,6 @@ function logMessagesBatch(channelId, messages) {
         });
     }
 
-    // Removed hard 30-message cap as requested
-
     saveMemory();
 }
 
