@@ -49,11 +49,6 @@ function logMessagesBatch(channelId, messages) {
     if (!messages || messages.length === 0) return;
 
     if (!memory[channelId]) {
-        // Prune older channels if we exceed 500 channels
-        const channelIds = Object.keys(memory);
-        if (channelIds.length >= 500) {
-            delete memory[channelIds[0]];
-        }
         memory[channelId] = [];
     }
 
@@ -63,11 +58,6 @@ function logMessagesBatch(channelId, messages) {
             message: msg.message,
             timestamp: msg.timestamp || Date.now()
         });
-    }
-
-    // Limit to 30 messages per channel to prevent memory leaks
-    if (memory[channelId].length > 30) {
-        memory[channelId] = memory[channelId].slice(-30);
     }
 
     saveMemory();

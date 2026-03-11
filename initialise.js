@@ -1,5 +1,9 @@
 require("dotenv").config();
 
+const { loadMemory } = require("./memory.js");
+// Initialize memory from disk before other modules are loaded
+loadMemory();
+
 const { setRandomStatus } = require("./functions/presence.js");
 const { commands } = require("./functions/commands.js");
 const { 
@@ -21,13 +25,10 @@ const {
 } = require("discord.js");
 
 const { WIKIS, CATEGORY_WIKI_MAP, STATUS_INTERVAL_MS, BOT_NAME, BOT_SETTINGS } = require("./config.js");
-const { logMessage, loadMemory } = require("./memory.js");
+const { logMessage } = require("./memory.js");
 const {
     getHistory
 } = require("./functions/conversation.js");
-
-// Initialize memory from disk
-loadMemory();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const {
