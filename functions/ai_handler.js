@@ -286,8 +286,13 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             for (const m of fileEmbedMatches) {
                 const rawValue = m[1].trim();
                 const normalized = rawValue.split(",").map(f => {
-                    const t = f.trim();
-                    return t.toLowerCase().startsWith("file:") ? t : `File:${t}`;
+                    let t = f.trim().replace(/_/g, " ");
+                    if (t.toLowerCase().startsWith("file:")) {
+                        t = "File:" + t.slice(5).trim();
+                    } else {
+                        t = "File:" + t;
+                    }
+                    return t;
                 });
                 normalizedFileMap.set(rawValue, normalized);
                 allTitles.push(...normalized);
@@ -446,7 +451,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     });
 
                     if (matches.length > 1) {
-                        matches.forEach(m => sentFileUrls.add(m.url));
+                        matches.forEach(m => { sentFileUrls.add(m.url); });
                         const container = buildPageEmbed(null, null, null, wikiConfigSafe, matches.map(m => ({ url: m.url, caption: m.title })));
                         await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
                     } else if (matches.length === 1) {
