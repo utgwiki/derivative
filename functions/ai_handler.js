@@ -437,7 +437,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             let match;
 
             const sendText = async (text) => {
-                const cleanedText = text.replace(/\[FILE_EMBED:[^\]]*\]/gi, "").trim();
+                const cleanedText = text.replace(/\[FILE_EMBED:[^\]]*\]/gi, "").replace(/\s+/g, ' ').trim();
                 if (!cleanedText) return;
 
                 const chunks = splitMessage(cleanedText);
@@ -474,12 +474,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     let imageSearchTitle = canonical;
 
                     if (canonical.includes("#")) {
-                        const [page, section] = canonical.split("#");
-                        imageSearchTitle = page.trim();
-                        const sectionData = await getSectionContent(page.trim(), section.trim(), wikiConfigSafe);
+                        const idx = canonical.indexOf("#");
+                        const page = canonical.slice(0, idx).trim();
+                        const section = canonical.slice(idx + 1).trim();
+                        imageSearchTitle = page;
+                        const sectionData = await getSectionContent(page, section, wikiConfigSafe);
                         if (sectionData) {
                             wikiAbstract = sectionData.content;
-                            displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
+                            displayTitle = `${page} § ${sectionData.displayTitle}`;
                             gallery = sectionData.gallery;
                         }
                     } else {
