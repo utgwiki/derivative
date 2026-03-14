@@ -13,7 +13,7 @@ const {
     askGeminiForPages,
     MESSAGES
 } = require("./conversation.js");
-const { buildPageEmbed } = require("./interactions.js");
+const { buildPageEmbed } = require("./embed_builder.js");
 const { fetch, smartReply: sharedSmartReply } = require("./utils.js");
 const { BOT_NAME, WIKIS, BOT_SETTINGS } = require("../config.js");
 const { MessageFlags } = require("discord.js");
