@@ -231,6 +231,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         const maxRetries = 3;
 
         while (retryCount < maxRetries) {
+            let shouldRetry = false;
             try {
                 if (!skipGemini) {
                     reply = await askGemini(
@@ -247,16 +248,42 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     break;
                 }
 
-                if (reply && reply !== MESSAGES.processingError && reply !== MESSAGES.aiServiceError) {
+                if (reply === MESSAGES.aiServiceError || reply === MESSAGES.processingError) {
+                    shouldRetry = true;
+                } else if (reply) {
                     break;
                 }
             } catch (err) {
                 console.error(`Gemini attempt ${retryCount + 1} failed:`, err);
+
+                const status = err.status || (err.response && err.response.status);
+                const isTransient = (status === 429 || status >= 500) ||
+                                    (err.name === 'AbortError') ||
+                                    (err.message && (err.message.includes("RESOURCE_EXHAUSTED") || err.message.includes("429") || err.message.includes("503")));
+
+                if (isTransient) {
+                    shouldRetry = true;
+                } else {
+                    console.error("Permanent AI error encountered, stopping retries.");
+                    reply = MESSAGES.processingError;
+                    break;
+                }
             }
-            retryCount++;
-            if (retryCount < maxRetries) {
-                console.log(`Retrying AI generation... (${retryCount}/${maxRetries})`);
-                await new Promise(r => setTimeout(r, 1000));
+
+            if (shouldRetry) {
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    const baseDelay = 1000;
+                    const backoff = baseDelay * Math.pow(2, retryCount - 1);
+                    const jitter = Math.random() * 500;
+                    const totalDelay = backoff + jitter;
+
+                    console.log(`Retrying AI generation... (${retryCount}/${maxRetries}) in ${Math.round(totalDelay)}ms`);
+                    await new Promise(r => setTimeout(r, totalDelay));
+                    continue;
+                }
+            } else {
+                break;
             }
         }
 
@@ -307,15 +334,19 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             let allTitles = [];
             for (const m of fileEmbedMatches) {
                 const rawValue = m[1].trim();
-                const titles = rawValue.split(",").map(f => {
-                    let t = f.trim().replace(/_/g, " ");
-                    if (t.toLowerCase().startsWith("file:")) {
-                        t = "File:" + t.slice(5).trim();
-                    } else {
-                        t = "File:" + t;
-                    }
-                    return t;
-                });
+                const titles = rawValue.split(",")
+                    .map(f => f.trim())
+                    .filter(f => f.length > 0)
+                    .map(f => {
+                        let t = f.replace(/_/g, " ");
+                        if (t.toLowerCase().startsWith("file:")) {
+                            t = "File:" + t.slice(5).trim();
+                        } else {
+                            t = "File:" + t;
+                        }
+                        return t;
+                    })
+                    .filter(t => t !== "File:");
                 allTitles.push(...titles);
             }
             const uniqueTitles = [...new Set(allTitles)];

@@ -8,7 +8,7 @@ const {
     ButtonStyle,
     ActionRowBuilder
 } = require("discord.js");
-const { BOT_NAME } = require("../config.js");
+const { BOT_NAME, BOT_SETTINGS } = require("../config.js");
 
 function buildPageEmbed(title, content, imageUrl, wikiConfig, gallery = null) {
     const container = new ContainerBuilder();
@@ -40,14 +40,21 @@ function buildPageEmbed(title, content, imageUrl, wikiConfig, gallery = null) {
 
         if (hasGallery) {
             const mediaGallery = new MediaGalleryBuilder();
-            for (const item of gallery.slice(0, 10)) {
-                const galleryItem = new MediaGalleryItemBuilder().setURL(item.url);
-                if (item.caption) {
-                    galleryItem.setDescription(item.caption.slice(0, 1000));
+            const maxAttachments = (typeof BOT_SETTINGS.MAX_ATTACHMENTS === 'number') ? BOT_SETTINGS.MAX_ATTACHMENTS : 10;
+            for (const item of gallery.slice(0, maxAttachments)) {
+                try {
+                    const galleryItem = new MediaGalleryItemBuilder().setURL(item.url);
+                    if (item.caption) {
+                        galleryItem.setDescription(item.caption.slice(0, 1000));
+                    }
+                    mediaGallery.addItems(galleryItem);
+                } catch (err) {
+                    console.warn(`Failed to add gallery item (${item.url}):`, err.message);
                 }
-                mediaGallery.addItems(galleryItem);
             }
-            container.addMediaGalleryComponents(mediaGallery);
+            if (mediaGallery.items.length > 0) {
+                container.addMediaGalleryComponents(mediaGallery);
+            }
         }
     }
 
