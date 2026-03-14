@@ -249,6 +249,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 }
 
                 if (!reply || !reply.trim() || reply === MESSAGES.aiServiceError || reply === MESSAGES.processingError) {
+                    const reason = !reply ? "empty" : (!reply.trim() ? "blank" : "error sentinel");
+                    console.warn(`Invalid AI response (${reason}) on attempt ${retryCount + 1}.`);
                     shouldRetry = true;
                 } else {
                     break;
@@ -526,16 +528,17 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
         }
 
-        if (embeddedFileInfos.length > 0) {
+        const filteredFiles = embeddedFileInfos.filter(f => typeof f.url === 'string' && f.url.startsWith('http'));
+        if (filteredFiles.length > 0) {
             const maxAttachments = (typeof BOT_SETTINGS.MAX_ATTACHMENTS === 'number') ? BOT_SETTINGS.MAX_ATTACHMENTS : 10;
-            const validFiles = embeddedFileInfos.slice(0, maxAttachments);
+            const finalFiles = filteredFiles.slice(0, maxAttachments);
 
-            if (validFiles.length > 1) {
-                const gallery = validFiles.map(f => ({ url: f.url, caption: f.title }));
+            if (finalFiles.length > 1) {
+                const gallery = finalFiles.map(f => ({ url: f.url, caption: f.title }));
                 const container = buildPageEmbed(null, null, null, wikiConfigSafe, gallery);
                 await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
-            } else if (validFiles.length === 1) {
-                await sendChunk({ content: validFiles[0].url });
+            } else if (finalFiles.length === 1) {
+                await sendChunk({ content: finalFiles[0].url });
             }
         }
 
