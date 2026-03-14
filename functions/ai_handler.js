@@ -279,7 +279,12 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             fileTitles = [...new Set(fileTitles)];
 
             if (fileTitles.length > 0) {
-                embeddedFileInfos = await getFileUrls(fileTitles, wikiConfigSafe);
+                try {
+                    embeddedFileInfos = await getFileUrls(fileTitles, wikiConfigSafe);
+                } catch (err) {
+                    console.error(`Error resolving file URLs for ${fileTitles.join(", ")}:`, err);
+                    embeddedFileInfos = [];
+                }
             }
         }
 
@@ -332,6 +337,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         let sent = false;
         let v2Used = false;
         const sentEmbedTitles = new Set();
+        const sentFileUrls = new Set();
 
         const sendChunk = async (payload) => {
             const replyOptions = { ...payload, allowedMentions: { repliedUser: false } };
@@ -418,6 +424,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 } else if (type === 'FILE_EMBED') {
                     const currentFileTitles = value.split(",").map(f => f.trim());
                     const matches = embeddedFileInfos.filter(f => {
+                        if (sentFileUrls.has(f.url)) return false;
                         return currentFileTitles.some(t => {
                             const tLower = t.toLowerCase();
                             const fTitleLower = f.title.toLowerCase();
@@ -428,9 +435,11 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     });
 
                     if (matches.length > 1) {
+                        matches.forEach(m => sentFileUrls.add(m.url));
                         const container = buildPageEmbed(null, null, null, wikiConfigSafe, matches.map(m => ({ url: m.url, caption: m.title })));
                         await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
                     } else if (matches.length === 1) {
+                        sentFileUrls.add(matches[0].url);
                         await sendChunk({ content: matches[0].url });
                     }
                 }
