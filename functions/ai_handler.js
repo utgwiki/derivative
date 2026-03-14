@@ -5,7 +5,8 @@ const {
     getWikiContent,
     getSectionContent,
     getLeadSection,
-    getFullSizeImageUrl
+    getFullSizeImageUrl,
+    getFileUrls
 } = require("./parse_page.js");
 const {
     askGemini,
@@ -266,6 +267,22 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             parsedReply = parsedReply.replace(embedRegex, "").trim();
         }
 
+        const fileEmbedRegex = /\[FILE_EMBED:\s*(.*?)\]/gi;
+        const fileEmbedMatches = [...parsedReply.matchAll(fileEmbedRegex)];
+        let embeddedFileInfos = [];
+
+        if (fileEmbedMatches.length > 0) {
+            let fileTitles = [];
+            for (const m of fileEmbedMatches) {
+                const requestedFiles = m[1].split(",").map(f => f.trim());
+                fileTitles.push(...requestedFiles);
+            }
+            if (fileTitles.length > 0) {
+                embeddedFileInfos = await getFileUrls(fileTitles, wikiConfigSafe);
+            }
+            parsedReply = parsedReply.replace(fileEmbedRegex, "").trim();
+        }
+
         if (isEphemeral) {
             parsedReply = parsedReply
                 .replace(/\[START_MESSAGE\]/g, "")
@@ -319,14 +336,23 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
 
         let sent = false;
 
-        if (shouldUseComponentsV2) {
+        if (shouldUseComponentsV2 || embeddedFileInfos.length > 1) {
             try {
+                const combinedGallery = [...(explicitTemplateGallery || [])];
+                if (embeddedFileInfos.length > 0) {
+                    embeddedFileInfos.forEach(f => {
+                        if (!combinedGallery.some(item => item.url === f.url)) {
+                            combinedGallery.push({ url: f.url, caption: f.title });
+                        }
+                    });
+                }
+
                 const container = buildPageEmbed(
                     explicitTemplateFoundTitle,
                     parsedReply,
                     primaryImageUrl,
                     wikiConfigSafe,
-                    explicitTemplateGallery
+                    combinedGallery.length > 0 ? combinedGallery : null
                 );
 
                 if (container.components && container.components.length > 0) {
@@ -390,6 +416,24 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 }
             } catch (fallbackErr) {
                 console.error("Standard text reply failed:", fallbackErr);
+            }
+        }
+
+        // Handle single file embed as a separate message
+        if (embeddedFileInfos.length === 1) {
+            const fileInfo = embeddedFileInfos[0];
+            const filePayload = { content: fileInfo.url, allowedMentions: { repliedUser: false } };
+
+            if (!sent) {
+                await smartReply(filePayload);
+                sent = true;
+            } else {
+                await new Promise(r => setTimeout(r, 1000));
+                if (isInteraction(messageOrInteraction)) {
+                    await messageOrInteraction.followUp(filePayload);
+                } else if (messageOrInteraction.channel) {
+                    await messageOrInteraction.channel.send(filePayload);
+                }
             }
         }
 
