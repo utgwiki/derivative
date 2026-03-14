@@ -466,6 +466,50 @@ async function loadPages() {
     }
 }
 
+async function getFileUrls(fileTitles, wikiConfig) {
+    if (!fileTitles || fileTitles.length === 0) return [];
+
+    const wikiConfigSafe = wikiConfig || {};
+    const wikiKey = wikiConfigSafe.key || (wikiConfigSafe.baseUrl ? resolveWikiKey(wikiConfigSafe.baseUrl, WIKIS) : "tagging");
+    const apiEndpoint = wikiConfigSafe.apiEndpoint || WIKIS[wikiKey]?.apiEndpoint;
+    if (!apiEndpoint) return [];
+
+    const params = new URLSearchParams({
+        action: "query",
+        titles: fileTitles.join("|"),
+        prop: "imageinfo",
+        iiprop: "url|mime",
+        format: "json",
+        redirects: 1
+    });
+
+    try {
+        const res = await fetchWithTimeout(`${apiEndpoint}?${params.toString()}`, {
+            headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const pages = json.query?.pages;
+        if (!pages) return [];
+
+        const results = [];
+        for (const page of Object.values(pages)) {
+            if (page.missing === undefined && page.imageinfo?.[0]) {
+                results.push({
+                    title: page.title,
+                    url: page.imageinfo[0].url,
+                    mime: page.imageinfo[0].mime
+                });
+            }
+        }
+        return results;
+    } catch (err) {
+        console.error(`Failed to fetch file URLs for ${fileTitles.join(", ")}:`, err.message);
+        return [];
+    }
+}
+
 async function getWikiContent(pageTitle, wikiConfig) {
     const wikiConfigSafe = wikiConfig || {};
     const wikiKey = wikiConfigSafe.key || (wikiConfigSafe.baseUrl ? resolveWikiKey(wikiConfigSafe.baseUrl, WIKIS) : "tagging");
@@ -477,7 +521,7 @@ async function getWikiContent(pageTitle, wikiConfig) {
         action: "parse",
         page: cleanTitle,
         format: "json",
-        prop: "text",
+        prop: "text|images",
     });
 
     try {
@@ -491,7 +535,19 @@ async function getWikiContent(pageTitle, wikiConfig) {
         const json = await res.json();
 
         if (json?.parse?.text?.["*"]) {
-            return htmlToMarkdown(json.parse.text["*"], wikiConfigSafe.baseUrl || WIKIS[wikiKey].baseUrl);
+            let markdown = htmlToMarkdown(json.parse.text["*"], wikiConfigSafe.baseUrl || WIKIS[wikiKey].baseUrl);
+
+            if (json.parse.images && json.parse.images.length > 0) {
+                const imageList = json.parse.images
+                    .filter(img => !img.toLowerCase().endsWith('.svg'))
+                    .map(img => `File:${img}`)
+                    .join(", ");
+                if (imageList) {
+                    markdown += `\n\n[SYSTEM: Available images on this page: ${imageList}]`;
+                }
+            }
+
+            return markdown;
         }
         return null;
     } catch (err) {
@@ -509,6 +565,7 @@ module.exports = {
     getFullSizeImageUrl,
     loadPages,
     getWikiContent,
+    getFileUrls,
     knownPages,
     knownPagesByWiki,
     pageLookupByWiki
