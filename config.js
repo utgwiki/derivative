@@ -46,6 +46,7 @@ const BOT_SETTINGS = {
     RESPONSE_CHANCE: 0.4,
     MIN_FOLLOWUP_DELAY: 10 * 1000,
     MAX_FOLLOWUP_DELAY: 60 * 60 * 1000,
+    MAX_ATTACHMENTS: 10,
 };
 
 const GEMINI_MODEL = "gemini-2.5-flash";

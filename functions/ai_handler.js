@@ -15,7 +15,7 @@ const {
 } = require("./conversation.js");
 const { buildPageEmbed } = require("./interactions.js");
 const { fetch, smartReply: sharedSmartReply } = require("./utils.js");
-const { BOT_NAME, WIKIS } = require("../config.js");
+const { BOT_NAME, WIKIS, BOT_SETTINGS } = require("../config.js");
 const { MessageFlags } = require("discord.js");
 
 const DISCORD_MAX_LENGTH = 2000;
@@ -227,19 +227,42 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         };
 
         let reply = "";
+        let retryCount = 0;
+        const maxRetries = 3;
 
-        if (!skipGemini) {
-            reply = await askGemini(
-                promptMsg,
-                wikiContent || undefined,
-                pageTitles.join(", ") || undefined,
-                imageParts,
-                messageOrInteraction,
-                tools,
-                isProactive
-            );
-        } else {
-            reply = explicitTemplateContent || "I don't know.";
+        while (retryCount < maxRetries) {
+            try {
+                if (!skipGemini) {
+                    reply = await askGemini(
+                        promptMsg,
+                        wikiContent || undefined,
+                        pageTitles.join(", ") || undefined,
+                        imageParts,
+                        messageOrInteraction,
+                        tools,
+                        isProactive
+                    );
+                } else {
+                    reply = explicitTemplateContent || "I don't know.";
+                    break;
+                }
+
+                if (reply && reply !== MESSAGES.processingError && reply !== MESSAGES.aiServiceError) {
+                    break;
+                }
+            } catch (err) {
+                console.error(`Gemini attempt ${retryCount + 1} failed:`, err);
+            }
+            retryCount++;
+            if (retryCount < maxRetries) {
+                console.log(`Retrying AI generation... (${retryCount}/${maxRetries})`);
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+
+        if (!reply || reply === MESSAGES.processingError || reply === MESSAGES.aiServiceError) {
+            console.warn("AI generation failed after retries.");
+            reply = "I'm sorry, I'm having trouble coming up with a response right now. Could you try asking again?";
         }
 
         if (reply.trim() === "[TERMINATE_MESSAGE]") {
@@ -279,13 +302,12 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         const fileEmbedRegex = /\[FILE_EMBED:\s*(.*?)\]/gi;
         const fileEmbedMatches = [...parsedReply.matchAll(fileEmbedRegex)];
         let embeddedFileInfos = [];
-        const normalizedFileMap = new Map();
 
         if (fileEmbedMatches.length > 0) {
             let allTitles = [];
             for (const m of fileEmbedMatches) {
                 const rawValue = m[1].trim();
-                const normalized = rawValue.split(",").map(f => {
+                const titles = rawValue.split(",").map(f => {
                     let t = f.trim().replace(/_/g, " ");
                     if (t.toLowerCase().startsWith("file:")) {
                         t = "File:" + t.slice(5).trim();
@@ -294,8 +316,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     }
                     return t;
                 });
-                normalizedFileMap.set(rawValue, normalized);
-                allTitles.push(...normalized);
+                allTitles.push(...titles);
             }
             const uniqueTitles = [...new Set(allTitles)];
 
@@ -359,7 +380,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         let sent = false;
         let v2Used = false;
         const sentEmbedTitles = new Set();
-        const sentFileUrls = new Set();
 
         const sendChunk = async (payload) => {
             const replyOptions = { ...payload, allowedMentions: { repliedUser: false } };
@@ -381,12 +401,15 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         };
 
         const executeSequentialOutput = async (fullText) => {
-            const combinedEmbedRegex = /\[(PAGE_EMBED|FILE_EMBED):\s*([^\]]*)\]/gi;
+            const pageEmbedRegex = /\[PAGE_EMBED:\s*(.*?)\]/gi;
             let lastIndex = 0;
             let match;
 
             const sendText = async (text) => {
-                const chunks = splitMessage(text);
+                const cleanedText = text.replace(/\[FILE_EMBED:[^\]]*\]/gi, "").trim();
+                if (!cleanedText) return;
+
+                const chunks = splitMessage(cleanedText);
                 for (const chunk of chunks) {
                     if (shouldUseComponentsV2 && !v2Used) {
                         const container = buildPageEmbed(
@@ -404,62 +427,42 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 }
             };
 
-            while ((match = combinedEmbedRegex.exec(fullText)) !== null) {
+            while ((match = pageEmbedRegex.exec(fullText)) !== null) {
                 const precedingText = fullText.slice(lastIndex, match.index).trim();
                 if (precedingText) {
                     await sendText(precedingText);
                 }
 
-                const type = match[1].toUpperCase();
-                const value = match[2].trim();
+                const value = match[1].trim();
+                const canonical = pageEmbedTitlesMap.get(value.toLowerCase());
+                if (canonical && !sentEmbedTitles.has(canonical)) {
+                    sentEmbedTitles.add(canonical);
+                    let wikiAbstract = null;
+                    let gallery = null;
+                    let displayTitle = canonical;
+                    let imageSearchTitle = canonical;
 
-                if (type === 'PAGE_EMBED') {
-                    const canonical = pageEmbedTitlesMap.get(value.toLowerCase());
-                    if (canonical && !sentEmbedTitles.has(canonical)) {
-                        sentEmbedTitles.add(canonical);
-                        let wikiAbstract = null;
-                        let gallery = null;
-                        let displayTitle = canonical;
-                        let imageSearchTitle = canonical;
-
-                        if (canonical.includes("#")) {
-                            const [page, section] = canonical.split("#");
-                            imageSearchTitle = page.trim();
-                            const sectionData = await getSectionContent(page.trim(), section.trim(), wikiConfigSafe);
-                            if (sectionData) {
-                                wikiAbstract = sectionData.content;
-                                displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
-                                gallery = sectionData.gallery;
-                            }
-                        } else {
-                            wikiAbstract = await getLeadSection(canonical, wikiConfigSafe);
+                    if (canonical.includes("#")) {
+                        const [page, section] = canonical.split("#");
+                        imageSearchTitle = page.trim();
+                        const sectionData = await getSectionContent(page.trim(), section.trim(), wikiConfigSafe);
+                        if (sectionData) {
+                            wikiAbstract = sectionData.content;
+                            displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
+                            gallery = sectionData.gallery;
                         }
-
-                        if (!wikiAbstract) wikiAbstract = "No content available.";
-                        if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
-
-                        const cardImageUrl = await fetchPageImage(imageSearchTitle);
-                        const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfigSafe, gallery);
-                        await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
+                    } else {
+                        wikiAbstract = await getLeadSection(canonical, wikiConfigSafe);
                     }
-                } else if (type === 'FILE_EMBED') {
-                    const normalized = normalizedFileMap.get(value) || [];
-                    const matches = embeddedFileInfos.filter(f => {
-                        if (sentFileUrls.has(f.url)) return false;
-                        const fTitleLower = f.title.toLowerCase();
-                        return normalized.some(nt => nt.toLowerCase() === fTitleLower);
-                    });
 
-                    if (matches.length > 1) {
-                        matches.forEach(m => { sentFileUrls.add(m.url); });
-                        const container = buildPageEmbed(null, null, null, wikiConfigSafe, matches.map(m => ({ url: m.url, caption: m.title })));
-                        await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
-                    } else if (matches.length === 1) {
-                        sentFileUrls.add(matches[0].url);
-                        await sendChunk({ content: matches[0].url });
-                    }
+                    if (!wikiAbstract) wikiAbstract = "No content available.";
+                    if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
+
+                    const cardImageUrl = await fetchPageImage(imageSearchTitle);
+                    const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfigSafe, gallery);
+                    await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
                 }
-                lastIndex = combinedEmbedRegex.lastIndex;
+                lastIndex = pageEmbedRegex.lastIndex;
             }
 
             const remainingText = fullText.slice(lastIndex).trim();
@@ -479,6 +482,19 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (shouldUseComponentsV2 && !v2Used) {
             const container = buildPageEmbed(explicitTemplateFoundTitle, " ", primaryImageUrl, wikiConfigSafe, explicitTemplateGallery);
             await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        }
+
+        if (embeddedFileInfos.length > 0) {
+            const maxAttachments = (typeof BOT_SETTINGS.MAX_ATTACHMENTS === 'number') ? BOT_SETTINGS.MAX_ATTACHMENTS : 10;
+            const validFiles = embeddedFileInfos.slice(0, maxAttachments);
+
+            if (validFiles.length > 1) {
+                const gallery = validFiles.map(f => ({ url: f.url, caption: f.title }));
+                const container = buildPageEmbed(null, null, null, wikiConfigSafe, gallery);
+                await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
+            } else if (validFiles.length === 1) {
+                await sendChunk({ content: validFiles[0].url });
+            }
         }
 
     } catch (err) {
