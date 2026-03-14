@@ -13,9 +13,9 @@ const {
     askGeminiForPages,
     MESSAGES
 } = require("./conversation.js");
-const { buildPageEmbed } = require("./interactions.js");
+const { buildPageEmbed } = require("./embed_builder.js");
 const { fetch, smartReply: sharedSmartReply } = require("./utils.js");
-const { BOT_NAME, WIKIS } = require("../config.js");
+const { BOT_NAME, WIKIS, BOT_SETTINGS } = require("../config.js");
 const { MessageFlags } = require("discord.js");
 
 const DISCORD_MAX_LENGTH = 2000;
@@ -227,19 +227,71 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         };
 
         let reply = "";
+        let retryCount = 0;
+        const maxRetries = 3;
 
-        if (!skipGemini) {
-            reply = await askGemini(
-                promptMsg,
-                wikiContent || undefined,
-                pageTitles.join(", ") || undefined,
-                imageParts,
-                messageOrInteraction,
-                tools,
-                isProactive
-            );
-        } else {
-            reply = explicitTemplateContent || "I don't know.";
+        while (retryCount < maxRetries) {
+            let shouldRetry = false;
+            try {
+                if (!skipGemini) {
+                    reply = await askGemini(
+                        promptMsg,
+                        wikiContent || undefined,
+                        pageTitles.join(", ") || undefined,
+                        imageParts,
+                        messageOrInteraction,
+                        tools,
+                        isProactive
+                    );
+                } else {
+                    reply = explicitTemplateContent || "I don't know.";
+                    break;
+                }
+
+                if (!reply || !reply.trim() || reply === MESSAGES.aiServiceError || reply === MESSAGES.processingError) {
+                    const reason = !reply ? "empty" : (!reply.trim() ? "blank" : "error sentinel");
+                    console.warn(`Invalid AI response (${reason}) on attempt ${retryCount + 1}.`);
+                    shouldRetry = true;
+                } else {
+                    break;
+                }
+            } catch (err) {
+                console.error(`Gemini attempt ${retryCount + 1} failed:`, err);
+
+                const status = err.status || (err.response && err.response.status);
+                const isTransient = (status === 429 || status >= 500) ||
+                                    (err.name === 'AbortError') ||
+                                    (err.message && (err.message.includes("RESOURCE_EXHAUSTED") || err.message.includes("429") || err.message.includes("503")));
+
+                if (isTransient) {
+                    shouldRetry = true;
+                } else {
+                    console.error("Permanent AI error encountered, stopping retries.");
+                    reply = MESSAGES.processingError;
+                    break;
+                }
+            }
+
+            if (shouldRetry) {
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    const baseDelay = 1000;
+                    const backoff = baseDelay * Math.pow(2, retryCount - 1);
+                    const jitter = Math.random() * 500;
+                    const totalDelay = backoff + jitter;
+
+                    console.log(`Retrying AI generation... (${retryCount}/${maxRetries}) in ${Math.round(totalDelay)}ms`);
+                    await new Promise(r => setTimeout(r, totalDelay));
+                    continue;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if (!reply || reply === MESSAGES.processingError || reply === MESSAGES.aiServiceError) {
+            console.warn("AI generation failed after retries.");
+            reply = "I'm sorry, I'm having trouble coming up with a response right now. Could you try asking again?";
         }
 
         if (reply.trim() === "[TERMINATE_MESSAGE]") {
@@ -279,23 +331,25 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         const fileEmbedRegex = /\[FILE_EMBED:\s*(.*?)\]/gi;
         const fileEmbedMatches = [...parsedReply.matchAll(fileEmbedRegex)];
         let embeddedFileInfos = [];
-        const normalizedFileMap = new Map();
 
         if (fileEmbedMatches.length > 0) {
             let allTitles = [];
             for (const m of fileEmbedMatches) {
                 const rawValue = m[1].trim();
-                const normalized = rawValue.split(",").map(f => {
-                    let t = f.trim().replace(/_/g, " ");
-                    if (t.toLowerCase().startsWith("file:")) {
-                        t = "File:" + t.slice(5).trim();
-                    } else {
-                        t = "File:" + t;
-                    }
-                    return t;
-                });
-                normalizedFileMap.set(rawValue, normalized);
-                allTitles.push(...normalized);
+                const titles = rawValue.split(",")
+                    .map(f => f.trim())
+                    .filter(f => f.length > 0)
+                    .map(f => {
+                        let t = f.replace(/_/g, " ");
+                        if (t.toLowerCase().startsWith("file:")) {
+                            t = "File:" + t.slice(5).trim();
+                        } else {
+                            t = "File:" + t;
+                        }
+                        return t;
+                    })
+                    .filter(t => t !== "File:");
+                allTitles.push(...titles);
             }
             const uniqueTitles = [...new Set(allTitles)];
 
@@ -359,7 +413,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         let sent = false;
         let v2Used = false;
         const sentEmbedTitles = new Set();
-        const sentFileUrls = new Set();
 
         const sendChunk = async (payload) => {
             const replyOptions = { ...payload, allowedMentions: { repliedUser: false } };
@@ -381,12 +434,20 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         };
 
         const executeSequentialOutput = async (fullText) => {
-            const combinedEmbedRegex = /\[(PAGE_EMBED|FILE_EMBED):\s*([^\]]*)\]/gi;
+            const pageEmbedRegex = /\[PAGE_EMBED:\s*(.*?)\]/gi;
             let lastIndex = 0;
             let match;
 
             const sendText = async (text) => {
-                const chunks = splitMessage(text);
+                const cleanedText = text
+                    .replace(/\[FILE_EMBED:[^\]]*\]/gi, "")
+                    .replace(/\r\n/g, '\n')
+                    .replace(/[^\S\r\n]+/g, ' ')
+                    .trim();
+
+                if (!cleanedText) return;
+
+                const chunks = splitMessage(cleanedText);
                 for (const chunk of chunks) {
                     if (shouldUseComponentsV2 && !v2Used) {
                         const container = buildPageEmbed(
@@ -404,62 +465,48 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 }
             };
 
-            while ((match = combinedEmbedRegex.exec(fullText)) !== null) {
+            while ((match = pageEmbedRegex.exec(fullText)) !== null) {
                 const precedingText = fullText.slice(lastIndex, match.index).trim();
                 if (precedingText) {
                     await sendText(precedingText);
                 }
 
-                const type = match[1].toUpperCase();
-                const value = match[2].trim();
+                const value = match[1].trim();
+                const canonical = pageEmbedTitlesMap.get(value.toLowerCase());
+                if (canonical && !sentEmbedTitles.has(canonical)) {
+                    sentEmbedTitles.add(canonical);
+                    let wikiAbstract = null;
+                    let gallery = null;
+                    let displayTitle = canonical;
+                    let imageSearchTitle = canonical;
 
-                if (type === 'PAGE_EMBED') {
-                    const canonical = pageEmbedTitlesMap.get(value.toLowerCase());
-                    if (canonical && !sentEmbedTitles.has(canonical)) {
-                        sentEmbedTitles.add(canonical);
-                        let wikiAbstract = null;
-                        let gallery = null;
-                        let displayTitle = canonical;
-                        let imageSearchTitle = canonical;
-
-                        if (canonical.includes("#")) {
-                            const [page, section] = canonical.split("#");
-                            imageSearchTitle = page.trim();
-                            const sectionData = await getSectionContent(page.trim(), section.trim(), wikiConfigSafe);
-                            if (sectionData) {
-                                wikiAbstract = sectionData.content;
-                                displayTitle = `${page.trim()} § ${sectionData.displayTitle}`;
-                                gallery = sectionData.gallery;
-                            }
-                        } else {
-                            wikiAbstract = await getLeadSection(canonical, wikiConfigSafe);
+                    if (canonical.includes("#")) {
+                        const idx = canonical.indexOf("#");
+                        const page = canonical.slice(0, idx).trim();
+                        const section = canonical.slice(idx + 1).trim();
+                        imageSearchTitle = page;
+                        const sectionData = await getSectionContent(page, section, wikiConfigSafe);
+                        if (sectionData) {
+                            wikiAbstract = sectionData.content;
+                            displayTitle = `${page} § ${sectionData.displayTitle}`;
+                            gallery = sectionData.gallery;
                         }
-
-                        if (!wikiAbstract) wikiAbstract = "No content available.";
-                        if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
-
-                        const cardImageUrl = await fetchPageImage(imageSearchTitle);
-                        const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfigSafe, gallery);
-                        await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
+                    } else {
+                        wikiAbstract = await getLeadSection(canonical, wikiConfigSafe);
                     }
-                } else if (type === 'FILE_EMBED') {
-                    const normalized = normalizedFileMap.get(value) || [];
-                    const matches = embeddedFileInfos.filter(f => {
-                        if (sentFileUrls.has(f.url)) return false;
-                        const fTitleLower = f.title.toLowerCase();
-                        return normalized.some(nt => nt.toLowerCase() === fTitleLower);
-                    });
 
-                    if (matches.length > 1) {
-                        matches.forEach(m => { sentFileUrls.add(m.url); });
-                        const container = buildPageEmbed(null, null, null, wikiConfigSafe, matches.map(m => ({ url: m.url, caption: m.title })));
-                        await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
-                    } else if (matches.length === 1) {
-                        sentFileUrls.add(matches[0].url);
-                        await sendChunk({ content: matches[0].url });
+                    if (!wikiAbstract) wikiAbstract = "No content available.";
+
+                    const graphemes = [...wikiAbstract];
+                    if (graphemes.length > 800) {
+                        wikiAbstract = graphemes.slice(0, 800).join('') + "...";
                     }
+
+                    const cardImageUrl = await fetchPageImage(imageSearchTitle);
+                    const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfigSafe, gallery);
+                    await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
                 }
-                lastIndex = combinedEmbedRegex.lastIndex;
+                lastIndex = pageEmbedRegex.lastIndex;
             }
 
             const remainingText = fullText.slice(lastIndex).trim();
@@ -479,6 +526,20 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (shouldUseComponentsV2 && !v2Used) {
             const container = buildPageEmbed(explicitTemplateFoundTitle, " ", primaryImageUrl, wikiConfigSafe, explicitTemplateGallery);
             await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        }
+
+        const filteredFiles = embeddedFileInfos.filter(f => typeof f.url === 'string' && f.url.startsWith('http'));
+        if (filteredFiles.length > 0) {
+            const maxAttachments = (typeof BOT_SETTINGS.MAX_ATTACHMENTS === 'number') ? BOT_SETTINGS.MAX_ATTACHMENTS : 10;
+            const finalFiles = filteredFiles.slice(0, maxAttachments);
+
+            if (finalFiles.length > 1) {
+                const gallery = finalFiles.map(f => ({ url: f.url, caption: f.title }));
+                const container = buildPageEmbed(null, null, null, wikiConfigSafe, gallery);
+                await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
+            } else if (finalFiles.length === 1) {
+                await sendChunk({ content: finalFiles[0].url });
+            }
         }
 
     } catch (err) {
