@@ -248,9 +248,9 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     break;
                 }
 
-                if (reply === MESSAGES.aiServiceError || reply === MESSAGES.processingError) {
+                if (!reply || !reply.trim() || reply === MESSAGES.aiServiceError || reply === MESSAGES.processingError) {
                     shouldRetry = true;
-                } else if (reply) {
+                } else {
                     break;
                 }
             } catch (err) {
@@ -437,7 +437,12 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             let match;
 
             const sendText = async (text) => {
-                const cleanedText = text.replace(/\[FILE_EMBED:[^\]]*\]/gi, "").replace(/\s+/g, ' ').trim();
+                const cleanedText = text
+                    .replace(/\[FILE_EMBED:[^\]]*\]/gi, "")
+                    .replace(/\r\n/g, '\n')
+                    .replace(/[^\S\r\n]+/g, ' ')
+                    .trim();
+
                 if (!cleanedText) return;
 
                 const chunks = splitMessage(cleanedText);
@@ -489,7 +494,11 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     }
 
                     if (!wikiAbstract) wikiAbstract = "No content available.";
-                    if (wikiAbstract.length > 800) wikiAbstract = wikiAbstract.slice(0, 800) + "...";
+
+                    const graphemes = [...wikiAbstract];
+                    if (graphemes.length > 800) {
+                        wikiAbstract = graphemes.slice(0, 800).join('') + "...";
+                    }
 
                     const cardImageUrl = await fetchPageImage(imageSearchTitle);
                     const container = buildPageEmbed(displayTitle, wikiAbstract, cardImageUrl, wikiConfigSafe, gallery);
