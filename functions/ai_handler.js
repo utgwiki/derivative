@@ -259,9 +259,19 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         if (embedMatches.length > 0) {
             for (const m of embedMatches) {
                 const requestedPage = m[1].trim();
-                const canonical = await findCanonicalTitle(requestedPage, wikiConfigSafe);
-                if (canonical) {
-                    pageEmbedTitlesMap.set(requestedPage.toLowerCase(), canonical);
+                let baseTitle = requestedPage;
+                let section = null;
+
+                if (requestedPage.includes("#")) {
+                    const idx = requestedPage.indexOf("#");
+                    baseTitle = requestedPage.slice(0, idx).trim();
+                    section = requestedPage.slice(idx + 1).trim();
+                }
+
+                const canonicalBase = await findCanonicalTitle(baseTitle, wikiConfigSafe);
+                if (canonicalBase) {
+                    const finalCanonical = section ? `${canonicalBase}#${section}` : canonicalBase;
+                    pageEmbedTitlesMap.set(requestedPage.toLowerCase(), finalCanonical);
                 }
             }
         }
@@ -353,7 +363,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 } else if (messageOrInteraction.channel) {
                     const sanitized = { ...replyOptions };
                     delete sanitized.ephemeral;
-                    delete sanitized.flags;
                     await messageOrInteraction.channel.send(sanitized);
                 }
             }
