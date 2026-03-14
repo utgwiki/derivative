@@ -279,20 +279,26 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         const fileEmbedRegex = /\[FILE_EMBED:\s*(.*?)\]/gi;
         const fileEmbedMatches = [...parsedReply.matchAll(fileEmbedRegex)];
         let embeddedFileInfos = [];
+        const normalizedFileMap = new Map();
 
         if (fileEmbedMatches.length > 0) {
-            let fileTitles = [];
+            let allTitles = [];
             for (const m of fileEmbedMatches) {
-                const requestedFiles = m[1].split(",").map(f => f.trim());
-                fileTitles.push(...requestedFiles);
+                const rawValue = m[1].trim();
+                const normalized = rawValue.split(",").map(f => {
+                    const t = f.trim();
+                    return t.toLowerCase().startsWith("file:") ? t : `File:${t}`;
+                });
+                normalizedFileMap.set(rawValue, normalized);
+                allTitles.push(...normalized);
             }
-            fileTitles = [...new Set(fileTitles)];
+            const uniqueTitles = [...new Set(allTitles)];
 
-            if (fileTitles.length > 0) {
+            if (uniqueTitles.length > 0) {
                 try {
-                    embeddedFileInfos = await getFileUrls(fileTitles, wikiConfigSafe);
+                    embeddedFileInfos = await getFileUrls(uniqueTitles, wikiConfigSafe);
                 } catch (err) {
-                    console.error(`Error resolving file URLs for ${fileTitles.join(", ")}:`, err);
+                    console.error(`Error resolving file URLs for ${uniqueTitles.join(", ")}:`, err);
                     embeddedFileInfos = [];
                 }
             }
@@ -305,6 +311,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 .replace(/\[PAGE_EMBED:[^\]]*\]/g, "")
                 .replace(/\[FILE_EMBED:[^\]]*\]/g, "")
                 .trim();
+            if (!parsedReply) parsedReply = "[Embeds hidden in ephemeral view]";
         }
 
         let botTaggedChunks = [];
@@ -431,16 +438,11 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         await sendChunk({ components: [container], flags: MessageFlags.IsComponentsV2 });
                     }
                 } else if (type === 'FILE_EMBED') {
-                    const currentFileTitles = value.split(",").map(f => f.trim());
+                    const normalized = normalizedFileMap.get(value) || [];
                     const matches = embeddedFileInfos.filter(f => {
                         if (sentFileUrls.has(f.url)) return false;
-                        return currentFileTitles.some(t => {
-                            const tLower = t.toLowerCase();
-                            const fTitleLower = f.title.toLowerCase();
-                            return fTitleLower === tLower ||
-                                   fTitleLower === 'file:' + tLower ||
-                                   (tLower.startsWith('file:') && fTitleLower === tLower);
-                        });
+                        const fTitleLower = f.title.toLowerCase();
+                        return normalized.some(nt => nt.toLowerCase() === fTitleLower);
                     });
 
                     if (matches.length > 1) {
