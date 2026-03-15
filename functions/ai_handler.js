@@ -265,12 +265,21 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         let sourceWiki = targetWikiKey;
 
                         if (results.length === 0) {
-                            const otherWikiKey = targetWikiKey === "tagging" ? "farm" : "tagging";
-                            console.log(`[Tool] No results on ${targetWikiKey}, trying ${otherWikiKey}...`);
-                            const otherResults = await performSearch(query, WIKIS[otherWikiKey]);
-                            if (otherResults.length > 0) {
-                                results = otherResults;
-                                sourceWiki = otherWikiKey;
+                            const wikiOrder = Object.keys(WIKIS);
+                            for (const fallbackKey of wikiOrder) {
+                                if (fallbackKey === targetWikiKey) continue;
+
+                                console.log(`[Tool] No results on ${sourceWiki}, trying ${fallbackKey}...`);
+                                try {
+                                    const otherResults = await performSearch(query, WIKIS[fallbackKey]);
+                                    if (otherResults.length > 0) {
+                                        results = otherResults;
+                                        sourceWiki = fallbackKey;
+                                        break;
+                                    }
+                                } catch (err) {
+                                    console.warn(`[Tool] searchWiki fallback to ${fallbackKey} failed:`, err.message);
+                                }
                             }
                         }
 

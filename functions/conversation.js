@@ -280,8 +280,14 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                     });
                                 } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
                                     if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
-                                        const key = normalizeToolKey(fnArgs.wiki, fnArgs.title);
-                                        if (key) pendingTitles.delete(key);
+                                        const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
+                                        if (requestedKey) pendingTitles.delete(requestedKey);
+
+                                        const canonicalTitle = fnResult.title || fnResult.page;
+                                        if (canonicalTitle) {
+                                            const canonicalKey = normalizeToolKey(fnArgs.wiki, canonicalTitle);
+                                            if (canonicalKey) pendingTitles.delete(canonicalKey);
+                                        }
                                     }
                                 }
 
