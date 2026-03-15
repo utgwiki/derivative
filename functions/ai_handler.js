@@ -160,12 +160,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const questionRegex = /\?|^\s*(?:@\w+|(?:hey|hi|hello|deriv|derivative|bot))\s+\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b|^\s*\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
-        const isQuestion = questionRegex.test(rawUserMsgSafe);
-
-        const contributionRegex = /\b(?:leaderboard|contribution|top editor|score|rank|top user)\b/i;
-        const isContributionIntent = contributionRegex.test(rawUserMsgSafe);
-
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
@@ -254,8 +248,12 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         return { results: [], instruction: "No search query provided. No fetchPage calls are needed." };
                     }
                     let targetWikiKey = 'tagging';
-                    if (wiki && WIKIS[wiki]) {
-                        targetWikiKey = wiki;
+                    if (wiki) {
+                        if (WIKIS[wiki]) {
+                            targetWikiKey = wiki;
+                        } else {
+                            return { error: `Invalid wiki "${wiki}" provided. Valid options are: ${Object.keys(WIKIS).join(", ")}` };
+                        }
                     } else if (wikiConfigSafe.key && WIKIS[wikiConfigSafe.key]) {
                         targetWikiKey = wikiConfigSafe.key;
                     } else if (wikiConfigSafe.baseUrl) {
@@ -333,8 +331,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         tools,
                         isProactive,
                         {
-                            forceSearch: isQuestion,
-                            allowContributionScoresFirst: isContributionIntent
+                            forceSearch: true,
+                            allowContributionScoresFirst: true
                         }
                     );
                 } else {

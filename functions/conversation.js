@@ -234,6 +234,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             
             let currentToolConfig = initialToolConfig;
             let pendingTitles = new Set();
+            let searchPerformed = false;
 
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
@@ -277,6 +278,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                 const fnResult = await tools.functions[fnName](fnArgs);
 
                                 if (fnName === "searchWiki" && fnResult.results) {
+                                    searchPerformed = true;
                                     fnResult.results.forEach(r => {
                                         const title = typeof r === 'string' ? r : r.title;
                                         const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
@@ -309,8 +311,20 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     
                     currentMessageParts = functionResponses;
                     
-                    // Update tool configuration based on pending fetches
-                    if (pendingTitles.size > 0) {
+                    // Update tool configuration based on pending fetches and mandatory search requirement
+                    if (!searchPerformed) {
+                        // Keep searchWiki (and maybe contrib) required if not done
+                        const allowed = ["searchWiki"];
+                        if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
+
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "ANY",
+                                allowedFunctionNames: allowed
+                            }
+                        };
+                    } else if (pendingTitles.size > 0) {
+                        // If search done but fetches pending, force fetchPage
                         currentToolConfig = {
                             functionCallingConfig: {
                                 mode: "ANY",
@@ -318,6 +332,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                             }
                         };
                     } else {
+                        // Both search and fetches complete, transition to AUTO
                         currentToolConfig = {
                             functionCallingConfig: {
                                 mode: "AUTO"
