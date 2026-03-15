@@ -160,7 +160,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const questionRegex = /\?|how|what|who|where|when|why|can you|could you|explain|tell me|search|find/i;
+        const questionRegex = /\?|\b(?:how|what|who|where|when|why|is|are|does|did|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
         const isQuestion = questionRegex.test(rawUserMsgSafe);
 
         let explicitTemplateName = null;
@@ -266,9 +266,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         }
 
                         return {
-                            results,
-                            wiki: sourceWiki,
-                            instruction: `REQUIRED: You MUST now call \`fetchPage\` for EACH of the following titles (from the "${sourceWiki}" wiki) to get their content before responding.`
+                            results: results.map(title => ({ title, wiki: sourceWiki })),
+                            instruction: `REQUIRED: You MUST now call \`fetchPage\` for EACH of the following titles (from the "${sourceWiki}" wiki) to get their content before responding. Ensure you pass the "wiki": "${sourceWiki}" parameter to each \`fetchPage\` call.`
                         };
                     } catch (err) {
                         console.error(`[Tool] searchWiki failed:`, err);

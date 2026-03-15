@@ -275,8 +275,23 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     
                     currentMessageParts = functionResponses;
                     
-                    // After the first forced search, allow any tool (like fetchPage)
-                    if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY") {
+                    // After the first forced search, transition to requiring fetchPage if searchWiki was called
+                    if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY" &&
+                        currentToolConfig.functionCallingConfig?.allowedFunctionNames?.includes("searchWiki")) {
+
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "ANY",
+                                allowedFunctionNames: ["fetchPage"]
+                            }
+                        };
+                    } else if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY" &&
+                               currentToolConfig.functionCallingConfig?.allowedFunctionNames?.includes("fetchPage")) {
+
+                        // After fetchPage is used, we can eventually transition to AUTO
+                        // But since we want to ensure ALL results are fetched, we might stay in ANY:fetchPage
+                        // until the LLM decides it's done.
+                        // Actually, transitioning to AUTO here allows it to finish or call more.
                         currentToolConfig = {
                             functionCallingConfig: {
                                 mode: "AUTO"
