@@ -213,14 +213,12 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 "searchWiki": async ({ query }) => {
                     console.log(`[Tool] searchWiki calling performSearch for: ${query}`);
                     const raw = await performSearch(query, wikiConfigSafe);
+                    if (Array.isArray(raw) && raw.length === 0) return { results: [] };
                     if (raw === "No results found.") return { results: [] };
                     if (typeof raw === "string" && raw.startsWith("Error searching wiki")) {
                         return { error: raw };
                     }
-                    const results = Array.isArray(raw)
-                        ? raw
-                        : String(raw).split(",").map(s => s.trim()).filter(Boolean);
-                    return { results };
+                    return { results: raw };
                 },
                 "fetchPage": async ({ title }) => {
                     console.log(`[Tool] fetchPage calling getWikiContent for: ${title}`);
