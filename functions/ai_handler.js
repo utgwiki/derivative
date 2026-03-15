@@ -163,6 +163,9 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         const questionRegex = /\?|^\s*(?:@\w+|(?:hey|hi|hello|deriv|derivative|bot))\s+\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b|^\s*\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
         const isQuestion = questionRegex.test(rawUserMsgSafe);
 
+        const contributionRegex = /\b(?:leaderboard|contribution|top editor|score|rank|top user)\b/i;
+        const isContributionIntent = contributionRegex.test(rawUserMsgSafe);
+
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
@@ -329,7 +332,10 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         messageOrInteraction,
                         tools,
                         isProactive,
-                        { forceSearch: isQuestion }
+                        {
+                            forceSearch: isQuestion,
+                            allowContributionScoresFirst: isContributionIntent
+                        }
                     );
                 } else {
                     reply = explicitTemplateContent || "I don't know.";

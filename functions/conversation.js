@@ -202,9 +202,14 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
 
             const initialToolConfig = {};
             if (options.forceSearch && hasCustomTools) {
+                const allowedFunctionNames = ["searchWiki"];
+                if (options.allowContributionScoresFirst) {
+                    allowedFunctionNames.push("getContributionScores");
+                }
+
                 initialToolConfig.functionCallingConfig = {
                     mode: "ANY",
-                    allowedFunctionNames: ["searchWiki"]
+                    allowedFunctionNames: allowedFunctionNames
                 };
             }
 
