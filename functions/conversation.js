@@ -117,6 +117,13 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
 }
 
 // --- GEMINI FUNCTIONS ---
+function normalizeToolKey(wiki, title) {
+    if (!wiki || !title) return null;
+    const normalizedWiki = wiki.toLowerCase().trim();
+    const normalizedTitle = title.toLowerCase().trim().replace(/_/g, ' ');
+    return `${normalizedWiki}:${normalizedTitle}`;
+}
+
 function extractText(result) {
     try {
         const candidate = result?.candidates?.[0];
@@ -268,11 +275,13 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                     fnResult.results.forEach(r => {
                                         const title = typeof r === 'string' ? r : r.title;
                                         const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
-                                        if (title) pendingTitles.add(`${wiki}:${title}`);
+                                        const key = normalizeToolKey(wiki, title);
+                                        if (key) pendingTitles.add(key);
                                     });
                                 } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
                                     if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
-                                        pendingTitles.delete(`${fnArgs.wiki}:${fnArgs.title}`);
+                                        const key = normalizeToolKey(fnArgs.wiki, fnArgs.title);
+                                        if (key) pendingTitles.delete(key);
                                     }
                                 }
 

@@ -160,7 +160,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const questionRegex = /\?|^\s*(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
+        const questionRegex = /\?|^\s*(?:@\w+|(?:hey|hi|hello|deriv|derivative|bot))\s+\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b|^\s*\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
         const isQuestion = questionRegex.test(rawUserMsgSafe);
 
         let explicitTemplateName = null;
