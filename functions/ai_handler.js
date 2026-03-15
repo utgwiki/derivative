@@ -6,11 +6,13 @@ const {
     getSectionContent,
     getLeadSection,
     getFullSizeImageUrl,
-    getFileUrls
+    getFileUrls,
+    searchWikiTool,
+    fetchPageTool,
+    performSearch
 } = require("./parse_page.js");
 const {
     askGemini,
-    askGeminiForPages,
     MESSAGES
 } = require("./conversation.js");
 const { buildPageEmbed } = require("./embed_builder.js");
@@ -200,28 +202,31 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        let pageTitles = [];
-        let wikiContent = "";
-
-        if (skipGemini) {
-            if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
-        } else {
-            pageTitles = await askGeminiForPages(rawUserMsgSafe, wikiConfigSafe);
-            if (pageTitles.length) {
-                for (const pageTitle of pageTitles) {
-                    const content = await getWikiContent(pageTitle, wikiConfigSafe);
-                    if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
-                }
-            }
-        }
-
         const tools = {
-            functionDeclarations: [contributionScoresTool],
+            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool],
             functions: {
                 "getContributionScores": async () => {
                     const result = await getContributionScores(wikiConfigSafe);
                     if (result.error) return { error: result.error };
                     return { result: result.result };
+                },
+                "searchWiki": async ({ query }) => {
+                    console.log(`[Tool] searchWiki calling performSearch for: ${query}`);
+                    try {
+                        const results = await performSearch(query, wikiConfigSafe);
+                        return { results };
+                    } catch (err) {
+                        console.error(`[Tool] searchWiki failed:`, err);
+                        return { results: [], error: `Search failed: ${err.message}` };
+                    }
+                },
+                "fetchPage": async ({ title }) => {
+                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title}`);
+                    const canonical = await findCanonicalTitle(title, wikiConfigSafe);
+                    if (!canonical) return { error: "Page not found" };
+
+                    const content = await getWikiContent(canonical, wikiConfigSafe);
+                    return content ? { title: canonical, content: content } : { error: "Unable to retrieve page content" };
                 }
             }
         };
@@ -236,8 +241,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 if (!skipGemini) {
                     reply = await askGemini(
                         promptMsg,
-                        wikiContent || undefined,
-                        pageTitles.join(", ") || undefined,
                         imageParts,
                         messageOrInteraction,
                         tools,
