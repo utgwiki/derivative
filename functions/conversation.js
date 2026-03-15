@@ -152,8 +152,8 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
-// 💡 UPDATED: Now accepts 'isProactive' parameter
-async function askGemini(userInput, imageParts = [], message = null, tools = null, isProactive = false) {
+// 💡 UPDATED: Now accepts 'isProactive' and 'options' parameters
+async function askGemini(userInput, imageParts = [], message = null, tools = null, isProactive = false, options = {}) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
     const channelId = message?.channel?.id || "global";
@@ -177,15 +177,21 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             // PREPARE TOOLS CONFIGURATION
             let geminiTools = [];
 
-            // Merge custom tools with native Google Search / URL Context
             const toolObj = {};
-            if (tools && tools.functionDeclarations) {
-                toolObj.functionDeclarations = tools.functionDeclarations;
-            }
-            toolObj.googleSearch = {};
-            toolObj.urlContext = {};
+            const hasCustomTools = !!(tools && tools.functionDeclarations && tools.functionDeclarations.length > 0);
 
-            geminiTools.push(toolObj);
+            if (hasCustomTools) {
+                // Cannot combine custom tools with built-in tools in some Gemini versions/models
+                toolObj.functionDeclarations = tools.functionDeclarations;
+            } else if (options.useGoogleSearch) {
+                // Only add native Google Search if no custom tools are present and explicitly requested
+                toolObj.googleSearch = {};
+                // toolObj.urlContext = {}; // Optional: include if needed
+            }
+
+            if (Object.keys(toolObj).length > 0) {
+                geminiTools.push(toolObj);
+            }
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
@@ -194,7 +200,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     tools: geminiTools, 
                     maxOutputTokens: 2500,
                 },
-                history: chatHistories.get(channelId),
+                history: options.useHistory === false ? [] : chatHistories.get(channelId),
             });
 
             // Initial User Message
@@ -290,8 +296,8 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive
-            if (finalResponse !== MESSAGES.aiServiceError && !isProactive) {
+            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive or history is disabled
+            if (finalResponse !== MESSAGES.aiServiceError && !isProactive && options.useHistory !== false) {
                 const username = message?.author?.username || "User";
                 persistConversationTurns(channelId,
                     { text: userInput, username, timestamp: currentTimestamp },

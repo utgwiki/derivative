@@ -9,6 +9,7 @@ const {
     getFileUrls,
     searchWikiTool,
     fetchPageTool,
+    googleSearchTool,
     performSearch
 } = require("./parse_page.js");
 const {
@@ -203,8 +204,40 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         }
 
         const tools = {
-            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool],
+            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool],
             functions: {
+                "googleSearch": async ({ query }) => {
+                    console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
+
+                    if (typeof query !== 'string' || query.trim().length === 0) {
+                        console.error(`[Tool] googleSearch invalid query:`, query);
+                        return { error: "Invalid search query provided." };
+                    }
+                    const sanitizedQuery = query.trim();
+
+                    try {
+                        const searchResult = await askGemini(
+                            `Search the web and provide a brief, factual answer to: ${sanitizedQuery}`,
+                            [],
+                            messageOrInteraction,
+                            null,
+                            true, // isProactive (prevents logging this sub-call to history)
+                            { useGoogleSearch: true, useHistory: false }
+                        );
+
+                        if (searchResult === MESSAGES.aiServiceError || searchResult === MESSAGES.processingError) {
+                            return { error: `Search sub-agent returned an error sentinel: ${searchResult}` };
+                        }
+                        if (searchResult && searchResult.error) {
+                            return { error: `Search sub-agent reported an error: ${searchResult.error}` };
+                        }
+
+                        return { result: searchResult };
+                    } catch (err) {
+                        console.error(`[Tool] googleSearch sub-agent failed:`, err);
+                        return { error: `Search failed: ${err.message}` };
+                    }
+                },
                 "getContributionScores": async () => {
                     const result = await getContributionScores(wikiConfigSafe);
                     if (result.error) return { error: result.error };
