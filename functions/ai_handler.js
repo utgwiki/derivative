@@ -9,6 +9,7 @@ const {
     getFileUrls,
     searchWikiTool,
     fetchPageTool,
+    googleSearchTool,
     performSearch
 } = require("./parse_page.js");
 const {
@@ -203,8 +204,25 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         }
 
         const tools = {
-            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool],
+            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool],
             functions: {
+                "googleSearch": async ({ query }) => {
+                    console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
+                    try {
+                        const searchResult = await askGemini(
+                            `Search the web and provide a brief, factual answer to: ${query}`,
+                            [],
+                            messageOrInteraction,
+                            null,
+                            true, // isProactive (prevents logging this sub-call to history)
+                            { useGoogleSearch: true }
+                        );
+                        return { result: searchResult };
+                    } catch (err) {
+                        console.error(`[Tool] googleSearch sub-agent failed:`, err);
+                        return { error: `Search failed: ${err.message}` };
+                    }
+                },
                 "getContributionScores": async () => {
                     const result = await getContributionScores(wikiConfigSafe);
                     if (result.error) return { error: result.error };

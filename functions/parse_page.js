@@ -580,9 +580,25 @@ const fetchPageTool = {
     }
 };
 
+const googleSearchTool = {
+    name: "googleSearch",
+    description: "Search the web for information using Google. Use this for off-topic queries or when the wiki doesn't have the information you need. Keep answers brief and in character.",
+    parametersJsonSchema: {
+        type: "object",
+        properties: {
+            query: {
+                type: "string",
+                description: "The search query."
+            }
+        },
+        required: ["query"]
+    }
+};
+
 module.exports = { 
     searchWikiTool,
     fetchPageTool,
+    googleSearchTool,
     findCanonicalTitle, 
     getPageData,
     getSectionContent, 
