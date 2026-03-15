@@ -131,8 +131,8 @@ async function handleContribScoresRequest(interaction, { toggleContribScore, WIK
 const contributionScoresTool = {
     name: "getContributionScores",
     description: "Retrieves the current leaderboard of top 10 contributors to the wiki, including their scores and edit counts. Use this when the user asks for 'top editors', 'leaderboard', 'who edits the most', etc.",
-    parameters: {
-        type: "OBJECT",
+    parametersJsonSchema: {
+        type: "object",
         properties: {}, // No parameters required
     },
 };
