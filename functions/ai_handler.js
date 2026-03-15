@@ -212,8 +212,16 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 },
                 "searchWiki": async ({ query }) => {
                     console.log(`[Tool] searchWiki calling performSearch for: ${query}`);
-                    const results = await performSearch(query, wikiConfigSafe);
-                    return { results };
+                    try {
+                        const results = await performSearch(query, wikiConfigSafe);
+                        if (results.length === 0) {
+                            return { results: [], error: "No results found on the wiki for your search query." };
+                        }
+                        return { results };
+                    } catch (err) {
+                        console.error(`[Tool] searchWiki failed:`, err);
+                        return { results: [], error: `Search failed: ${err.message}` };
+                    }
                 },
                 "fetchPage": async ({ title }) => {
                     console.log(`[Tool] fetchPage calling getWikiContent for: ${title}`);

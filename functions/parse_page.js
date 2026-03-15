@@ -349,7 +349,7 @@ async function performSearch(query, wikiConfig) {
     const wikiConfigSafe = wikiConfig || {};
     const wikiKey = wikiConfigSafe.key || (wikiConfigSafe.baseUrl ? resolveWikiKey(wikiConfigSafe.baseUrl, WIKIS) : "tagging");
     const apiEndpoint = wikiConfigSafe.apiEndpoint || WIKIS[wikiKey]?.apiEndpoint;
-    if (!apiEndpoint) return ["Error searching wiki: No API endpoint."];
+    if (!apiEndpoint) throw new Error("No API endpoint configured for this wiki.");
 
     const params = new URLSearchParams({
         action: "query",
@@ -358,19 +358,13 @@ async function performSearch(query, wikiConfig) {
         format: "json"
     });
 
-    try {
-        const res = await fetchWithTimeout(`${apiEndpoint}?${params.toString()}`, {
-            headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        const results = json.query?.search || [];
-        if (results.length === 0) return ["No results found."];
-        return results.map(r => r.title);
-    } catch (err) {
-        console.error(`Search API error for ${wikiConfigSafe.name || wikiKey}:`, err);
-        return ["Error searching wiki."];
-    }
+    const res = await fetchWithTimeout(`${apiEndpoint}?${params.toString()}`, {
+        headers: { "User-Agent": `DiscordBot/${BOT_NAME}` }
+    });
+    if (!res.ok) throw new Error(`Wiki API returned ${res.status}: ${res.statusText}`);
+    const json = await res.json();
+    const results = json.query?.search || [];
+    return results.map(r => r.title);
 }
 
 async function getAllNamespaces(wikiConfig) {
@@ -559,11 +553,11 @@ async function getWikiContent(pageTitle, wikiConfig) {
 const searchWikiTool = {
     name: "searchWiki",
     description: "Search for pages on the wiki. Returns a list of matching page titles. Use this when you don't know the exact title or if there might be multiple relevant pages. If results are ambiguous, ask the user for clarification.",
-    parameters: {
-        type: "OBJECT",
+    parametersJsonSchema: {
+        type: "object",
         properties: {
             query: {
-                type: "STRING",
+                type: "string",
                 description: "The search query."
             }
         },
@@ -574,11 +568,11 @@ const searchWikiTool = {
 const fetchPageTool = {
     name: "fetchPage",
     description: "Fetch the full markdown content of a specific wiki page. Use this when you have a specific page title from searchWiki or if the user mentions a specific page. This tool will also provide a list of images available on the page.",
-    parameters: {
-        type: "OBJECT",
+    parametersJsonSchema: {
+        type: "object",
         properties: {
             title: {
-                type: "STRING",
+                type: "string",
                 description: "The exact title of the page to fetch."
             }
         },
