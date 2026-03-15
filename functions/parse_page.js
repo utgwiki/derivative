@@ -366,7 +366,7 @@ async function performSearch(query, wikiConfig) {
         const json = await res.json();
         const results = json.query?.search || [];
         if (results.length === 0) return "No results found.";
-        return results.map(r => r.title).join(", ");
+        return results.map(r => r.title);
     } catch (err) {
         console.error(`Search API error for ${wikiConfigSafe.name || wikiKey}:`, err);
         return "Error searching wiki.";
