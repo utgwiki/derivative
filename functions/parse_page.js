@@ -349,7 +349,7 @@ async function performSearch(query, wikiConfig) {
     const wikiConfigSafe = wikiConfig || {};
     const wikiKey = wikiConfigSafe.key || (wikiConfigSafe.baseUrl ? resolveWikiKey(wikiConfigSafe.baseUrl, WIKIS) : "tagging");
     const apiEndpoint = wikiConfigSafe.apiEndpoint || WIKIS[wikiKey]?.apiEndpoint;
-    if (!apiEndpoint) return "Error searching wiki: No API endpoint.";
+    if (!apiEndpoint) return ["Error searching wiki: No API endpoint."];
 
     const params = new URLSearchParams({
         action: "query",
@@ -365,11 +365,11 @@ async function performSearch(query, wikiConfig) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const results = json.query?.search || [];
-        if (results.length === 0) return "No results found.";
+        if (results.length === 0) return ["No results found."];
         return results.map(r => r.title);
     } catch (err) {
         console.error(`Search API error for ${wikiConfigSafe.name || wikiKey}:`, err);
-        return "Error searching wiki.";
+        return ["Error searching wiki."];
     }
 }
 

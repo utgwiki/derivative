@@ -178,13 +178,11 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             // PREPARE TOOLS CONFIGURATION
             let geminiTools = [];
 
-            // If custom tools (like leaderboard) are passed, add their definitions
+            // Merge custom tools with native Google Search / URL Context
             if (tools && tools.functionDeclarations) {
                 geminiTools.push({ functionDeclarations: tools.functionDeclarations });
-            } else {
-                // Fallback to Google Search if no custom tools are provided
-                geminiTools = [ {googleSearch: {}}, {urlContext: {}} ];
             }
+            geminiTools.push({ googleSearch: {} }, { urlContext: {} });
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
