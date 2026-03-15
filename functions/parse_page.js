@@ -556,7 +556,39 @@ async function getWikiContent(pageTitle, wikiConfig) {
     }
 }
 
+const searchWikiTool = {
+    name: "searchWiki",
+    description: "Search for pages on the wiki. Returns a list of matching page titles. Use this when you don't know the exact title or if there might be multiple relevant pages. If results are ambiguous, ask the user for clarification.",
+    parameters: {
+        type: "OBJECT",
+        properties: {
+            query: {
+                type: "STRING",
+                description: "The search query."
+            }
+        },
+        required: ["query"]
+    }
+};
+
+const fetchPageTool = {
+    name: "fetchPage",
+    description: "Fetch the full markdown content of a specific wiki page. Use this when you have a specific page title from searchWiki or if the user mentions a specific page. This tool will also provide a list of images available on the page.",
+    parameters: {
+        type: "OBJECT",
+        properties: {
+            title: {
+                type: "STRING",
+                description: "The exact title of the page to fetch."
+            }
+        },
+        required: ["title"]
+    }
+};
+
 module.exports = { 
+    searchWikiTool,
+    fetchPageTool,
     findCanonicalTitle, 
     getPageData,
     getSectionContent, 

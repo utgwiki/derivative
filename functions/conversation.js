@@ -132,40 +132,6 @@ function extractText(result) {
     }
 }
 
-// Page selection Gemini (uses GEMINI_PAGE_KEY)
-async function askGeminiForPages(userInput, wikiConfig) {
-    if (!wikiConfig) return [];
-    const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
-
-    // Use wiki key directly from config
-    const wikiKey = wikiConfig.key || "tagging";
-    const wikiPages = knownPagesByWiki.get(wikiKey) || [];
-
-    const prompt = `User asked: "${userInput}"
-From this wiki page list: ${wikiPages.join(", ")}
-Pick up to at least 5 relevant page titles that best match the request. 
-Return only the exact page titles, one per line.
-If none are relevant, return "NONE".`;
-
-    try {
-        const result = await gemini.models.generateContent({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            config: { maxOutputTokens: 100 },
-        });
-        const text = extractText(result);
-        if (!text || text === "NONE") return [];
-        return [...new Set(
-            text.split("\n")
-            .map(p => p.replace(/^["']|["']$/g, "").trim())
-            .filter(Boolean)
-        )].slice(0, 5);
-    } catch (err) {
-        console.error(`Gemini page selection error for ${BOT_NAME} on wiki ${wikiKey}: `, err);
-        return [];
-    }
-}
-
 async function runWithMainKeys(fn) {
     const keys = MAIN_KEYS;
     if (!keys.length) throw new Error("No Gemini main keys set!");
@@ -188,7 +154,7 @@ async function runWithMainKeys(fn) {
 }
 
 // 💡 UPDATED: Now accepts 'isProactive' parameter
-async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null, tools = null, isProactive = false) {
+async function askGemini(userInput, imageParts = [], message = null, tools = null, isProactive = false) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
     const channelId = message?.channel?.id || "global";
@@ -203,10 +169,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
     // 1. Build Initial System Prompt
     let sysInstr = getSystemInstruction(wikiConfig);
-    
-    if (wikiContent && pageTitle) {
-        sysInstr += `\n\n[PRE-LOADED CONTEXT]: "${pageTitle}"\n${wikiContent}`;
-    }
 
     if (!chatHistories.has(channelId)) chatHistories.set(channelId, []);
 
@@ -309,32 +271,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 }
                 text = (text || "").trim();
                 
-                // 3. Handle Legacy MW_SEARCH / MW_CONTENT tags
-                const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
-                if (searchMatch) {
-                    const query = searchMatch[1].trim();
-                    console.log(`[Tool] Searching for: ${query}`);
-                    const searchResults = await performSearch(query, wikiConfig);
-                    currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
-                    continue; 
-                }
-
-                const contentMatch = text.match(/\[MW_CONTENT:\s*(.*?)\]/i);
-                if (contentMatch) {
-                    const requestedTitle = contentMatch[1].trim();
-                    console.log(`[Tool] Fetching content for: ${requestedTitle}`);
-                    const canonical = await findCanonicalTitle(requestedTitle, wikiConfig) || requestedTitle;
-                    const content = await getWikiContent(canonical, wikiConfig);
-                    
-                    const resultText = content 
-                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}` 
-                        : `[SYSTEM] Page not found.`;
-
-                    currentMessageParts = [{ text: resultText }];
-                    continue;
-                }
-
-                // 4. Final Answer
+                // 3. Final Answer
                 finalResponse = text;
                 break;
             }
@@ -346,8 +283,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             // Clean up internal thoughts
             finalResponse = finalResponse
-                .replace(/\[MW_SEARCH:.*?\]/g, "")
-                .replace(/\[MW_CONTENT:.*?\]/g, "")
                 .replace(/\[THOUGHT\][\s\S]*?(?:\[\/THOUGHT\]|$)|\[HISTORY[^\]]*\]/gi, "");
 
             finalResponse = stripSystemMessages(finalResponse);
@@ -377,7 +312,6 @@ function getHistory(channelId) {
 
 module.exports = {
     askGemini,
-    askGeminiForPages,
     MESSAGES,
     getHistory
 };
