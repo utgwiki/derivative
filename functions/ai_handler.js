@@ -215,8 +215,16 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                             messageOrInteraction,
                             null,
                             true, // isProactive (prevents logging this sub-call to history)
-                            { useGoogleSearch: true }
+                            { useGoogleSearch: true, useHistory: false }
                         );
+
+                        if (searchResult === MESSAGES.aiServiceError || searchResult === MESSAGES.processingError) {
+                            return { error: `Search sub-agent returned an error sentinel: ${searchResult}` };
+                        }
+                        if (searchResult && searchResult.error) {
+                            return { error: `Search sub-agent reported an error: ${searchResult.error}` };
+                        }
+
                         return { result: searchResult };
                     } catch (err) {
                         console.error(`[Tool] googleSearch sub-agent failed:`, err);

@@ -200,7 +200,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     tools: geminiTools, 
                     maxOutputTokens: 2500,
                 },
-                history: chatHistories.get(channelId),
+                history: options.useHistory === false ? [] : chatHistories.get(channelId),
             });
 
             // Initial User Message
