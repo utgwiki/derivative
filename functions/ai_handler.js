@@ -245,14 +245,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 },
                 "searchWiki": async ({ query, wiki }) => {
                     if (!query || query.trim().length === 0) {
-                        return { results: [], instruction: "No search query provided. No fetchPage calls are needed." };
+                        throw new Error("No search query provided.");
                     }
                     let targetWikiKey = 'tagging';
                     if (wiki) {
                         if (WIKIS[wiki]) {
                             targetWikiKey = wiki;
                         } else {
-                            return { error: `Invalid wiki "${wiki}" provided. Valid options are: ${Object.keys(WIKIS).join(", ")}` };
+                            throw new Error(`Invalid wiki "${wiki}" provided. Valid options are: ${Object.keys(WIKIS).join(", ")}`);
                         }
                     } else if (wikiConfigSafe.key && WIKIS[wikiConfigSafe.key]) {
                         targetWikiKey = wikiConfigSafe.key;
@@ -332,7 +332,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         isProactive,
                         {
                             forceSearch: true,
-                            allowContributionScoresFirst: true
+                            allowContributionScoresFirst: false
                         }
                     );
                 } else {

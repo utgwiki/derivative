@@ -234,7 +234,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             
             let currentToolConfig = initialToolConfig;
             let pendingTitles = new Set();
-            let searchPerformed = false;
+            let searchAttempted = false;
 
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
@@ -277,14 +277,16 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
 
-                                if (fnName === "searchWiki" && fnResult.results) {
-                                    searchPerformed = true;
-                                    fnResult.results.forEach(r => {
-                                        const title = typeof r === 'string' ? r : r.title;
-                                        const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
-                                        const key = normalizeToolKey(wiki, title);
-                                        if (key) pendingTitles.add(key);
-                                    });
+                                if (fnName === "searchWiki") {
+                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results)) {
+                                        searchAttempted = true;
+                                        fnResult.results.forEach(r => {
+                                            const title = typeof r === 'string' ? r : r.title;
+                                            const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
+                                            const key = normalizeToolKey(wiki, title);
+                                            if (key) pendingTitles.add(key);
+                                        });
+                                    }
                                 } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
                                     if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
                                         const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
@@ -312,8 +314,16 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     currentMessageParts = functionResponses;
                     
                     // Update tool configuration based on pending fetches and mandatory search requirement
-                    if (!searchPerformed) {
-                        // Keep searchWiki (and maybe contrib) required if not done
+                    if (pendingTitles.size > 0) {
+                        // If fetches pending, force fetchPage (even if search was done in the same turn)
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "ANY",
+                                allowedFunctionNames: ["fetchPage"]
+                            }
+                        };
+                    } else if (!searchAttempted) {
+                        // If search not yet successfully done, keep forcing it
                         const allowed = ["searchWiki"];
                         if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
 
@@ -323,16 +333,8 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                 allowedFunctionNames: allowed
                             }
                         };
-                    } else if (pendingTitles.size > 0) {
-                        // If search done but fetches pending, force fetchPage
-                        currentToolConfig = {
-                            functionCallingConfig: {
-                                mode: "ANY",
-                                allowedFunctionNames: ["fetchPage"]
-                            }
-                        };
                     } else {
-                        // Both search and fetches complete, transition to AUTO
+                        // Both search and any/all fetches complete (or no results found), transition to AUTO
                         currentToolConfig = {
                             functionCallingConfig: {
                                 mode: "AUTO"
