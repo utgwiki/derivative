@@ -193,11 +193,20 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                 geminiTools.push(toolObj);
             }
 
+            const initialToolConfig = {};
+            if (options.forceSearch && hasCustomTools) {
+                initialToolConfig.functionCallingConfig = {
+                    mode: "ANY",
+                    allowedFunctionNames: ["searchWiki"]
+                };
+            }
+
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
                 config: { 
                     systemInstruction: sysInstr,
                     tools: geminiTools, 
+                    toolConfig: initialToolConfig,
                     maxOutputTokens: 2500,
                 },
                 history: options.useHistory === false ? [] : chatHistories.get(channelId),
@@ -209,15 +218,18 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             
             let finalResponse = "";
             let iterations = 0;
-            const MAX_ITERATIONS = 5; 
+            const MAX_ITERATIONS = 10;
             
+            let currentToolConfig = initialToolConfig;
+
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
 
                 // 1. Send message to Gemini
                 // 💡 FIX: Pass entire currentMessageParts to retain roles.
                 const response = await chat.sendMessage({
-                    message: currentMessageParts
+                    message: currentMessageParts,
+                    config: { toolConfig: currentToolConfig }
                 });
 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
@@ -263,6 +275,15 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     
                     currentMessageParts = functionResponses;
                     
+                    // After the first forced search, allow any tool (like fetchPage)
+                    if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY") {
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "AUTO"
+                            }
+                        };
+                    }
+
                     continue; // Loop back to give Gemini the data
                 }
 

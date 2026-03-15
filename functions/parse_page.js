@@ -559,6 +559,11 @@ const searchWikiTool = {
             query: {
                 type: "string",
                 description: "The search query."
+            },
+            wiki: {
+                type: "string",
+                description: "The wiki to search on.",
+                enum: ["tagging", "farm"]
             }
         },
         required: ["query"]
@@ -574,6 +579,11 @@ const fetchPageTool = {
             title: {
                 type: "string",
                 description: "The exact title of the page to fetch."
+            },
+            wiki: {
+                type: "string",
+                description: "The wiki to fetch from.",
+                enum: ["tagging", "farm"]
             }
         },
         required: ["title"]

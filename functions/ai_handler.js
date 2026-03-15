@@ -160,6 +160,9 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
+        const questionRegex = /\?|how|what|who|where|when|why|can you|could you|explain|tell me|search|find/i;
+        const isQuestion = questionRegex.test(rawUserMsgSafe);
+
         let explicitTemplateName = null;
         let explicitTemplateContent = null;
         let explicitTemplateFoundTitle = null;
@@ -243,22 +246,42 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     if (result.error) return { error: result.error };
                     return { result: result.result };
                 },
-                "searchWiki": async ({ query }) => {
-                    console.log(`[Tool] searchWiki calling performSearch for: ${query}`);
+                "searchWiki": async ({ query, wiki }) => {
+                    let targetWikiKey = wiki && WIKIS[wiki] ? wiki : (wikiConfigSafe.key || 'tagging');
+                    let targetWiki = WIKIS[targetWikiKey];
+
+                    console.log(`[Tool] searchWiki calling performSearch for: ${query} on ${targetWiki.name}`);
                     try {
-                        const results = await performSearch(query, wikiConfigSafe);
-                        return { results };
+                        let results = await performSearch(query, targetWiki);
+                        let sourceWiki = targetWikiKey;
+
+                        if (results.length === 0) {
+                            const otherWikiKey = targetWikiKey === "tagging" ? "farm" : "tagging";
+                            console.log(`[Tool] No results on ${targetWikiKey}, trying ${otherWikiKey}...`);
+                            const otherResults = await performSearch(query, WIKIS[otherWikiKey]);
+                            if (otherResults.length > 0) {
+                                results = otherResults;
+                                sourceWiki = otherWikiKey;
+                            }
+                        }
+
+                        return {
+                            results,
+                            wiki: sourceWiki,
+                            instruction: `REQUIRED: You MUST now call \`fetchPage\` for EACH of the following titles (from the "${sourceWiki}" wiki) to get their content before responding.`
+                        };
                     } catch (err) {
                         console.error(`[Tool] searchWiki failed:`, err);
                         return { results: [], error: `Search failed: ${err.message}` };
                     }
                 },
-                "fetchPage": async ({ title }) => {
-                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title}`);
-                    const canonical = await findCanonicalTitle(title, wikiConfigSafe);
+                "fetchPage": async ({ title, wiki }) => {
+                    const targetWiki = (wiki && WIKIS[wiki]) ? WIKIS[wiki] : wikiConfigSafe;
+                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title} on ${targetWiki.name || 'default'}`);
+                    const canonical = await findCanonicalTitle(title, targetWiki);
                     if (!canonical) return { error: "Page not found" };
 
-                    const content = await getWikiContent(canonical, wikiConfigSafe);
+                    const content = await getWikiContent(canonical, targetWiki);
                     return content ? { title: canonical, content: content } : { error: "Unable to retrieve page content" };
                 }
             }
@@ -277,7 +300,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         imageParts,
                         messageOrInteraction,
                         tools,
-                        isProactive
+                        isProactive,
+                        { forceSearch: isQuestion }
                     );
                 } else {
                     reply = explicitTemplateContent || "I don't know.";
