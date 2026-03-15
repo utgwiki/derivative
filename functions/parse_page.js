@@ -586,7 +586,7 @@ const fetchPageTool = {
                 enum: ["tagging", "farm"]
             }
         },
-        required: ["title"]
+        required: ["title", "wiki"]
     }
 };
 

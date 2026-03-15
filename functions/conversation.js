@@ -270,7 +270,9 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                         else if (r && r.title) pendingTitles.add(r.title);
                                     });
                                 } else if (fnName === "fetchPage" && fnArgs.title) {
-                                    pendingTitles.delete(fnArgs.title);
+                                    if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
+                                        pendingTitles.delete(fnArgs.title);
+                                    }
                                 }
 
                                 functionResponses.push(createResponse(fnResult));
@@ -287,21 +289,19 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     currentMessageParts = functionResponses;
                     
                     // Update tool configuration based on pending fetches
-                    if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY") {
-                        if (pendingTitles.size > 0) {
-                            currentToolConfig = {
-                                functionCallingConfig: {
-                                    mode: "ANY",
-                                    allowedFunctionNames: ["fetchPage"]
-                                }
-                            };
-                        } else {
-                            currentToolConfig = {
-                                functionCallingConfig: {
-                                    mode: "AUTO"
-                                }
-                            };
-                        }
+                    if (pendingTitles.size > 0) {
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "ANY",
+                                allowedFunctionNames: ["fetchPage"]
+                            }
+                        };
+                    } else {
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "AUTO"
+                            }
+                        };
                     }
 
                     continue; // Loop back to give Gemini the data

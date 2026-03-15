@@ -247,7 +247,16 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     return { result: result.result };
                 },
                 "searchWiki": async ({ query, wiki }) => {
-                    let targetWikiKey = wiki && WIKIS[wiki] ? wiki : (wikiConfigSafe.key || 'tagging');
+                    let targetWikiKey = 'tagging';
+                    if (wiki && WIKIS[wiki]) {
+                        targetWikiKey = wiki;
+                    } else if (wikiConfigSafe.key && WIKIS[wikiConfigSafe.key]) {
+                        targetWikiKey = wikiConfigSafe.key;
+                    } else if (wikiConfigSafe.baseUrl) {
+                        const matchedKey = Object.keys(WIKIS).find(k => WIKIS[k].baseUrl === wikiConfigSafe.baseUrl);
+                        if (matchedKey) targetWikiKey = matchedKey;
+                    }
+
                     let targetWiki = WIKIS[targetWikiKey];
 
                     console.log(`[Tool] searchWiki calling performSearch for: ${query} on ${targetWiki.name}`);
