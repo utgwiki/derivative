@@ -204,7 +204,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             if (options.forceSearch && hasCustomTools) {
                 initialToolConfig.functionCallingConfig = {
                     mode: "ANY",
-                    allowedFunctionNames: ["searchWiki", "getContributionScores"]
+                    allowedFunctionNames: ["searchWiki"]
                 };
             }
 

@@ -247,6 +247,9 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     return { result: result.result };
                 },
                 "searchWiki": async ({ query, wiki }) => {
+                    if (!query || query.trim().length === 0) {
+                        return { results: [], instruction: "No search query provided. No fetchPage calls are needed." };
+                    }
                     let targetWikiKey = 'tagging';
                     if (wiki && WIKIS[wiki]) {
                         targetWikiKey = wiki;
