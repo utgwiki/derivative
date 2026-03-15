@@ -178,10 +178,14 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             let geminiTools = [];
 
             // Merge custom tools with native Google Search / URL Context
+            const toolObj = {};
             if (tools && tools.functionDeclarations) {
-                geminiTools.push({ functionDeclarations: tools.functionDeclarations });
+                toolObj.functionDeclarations = tools.functionDeclarations;
             }
-            geminiTools.push({ googleSearch: {} }, { urlContext: {} });
+            toolObj.googleSearch = {};
+            toolObj.urlContext = {};
+
+            geminiTools.push(toolObj);
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
