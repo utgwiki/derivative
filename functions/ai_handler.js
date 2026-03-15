@@ -160,7 +160,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const questionRegex = /\?|\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
+        const questionRegex = /\?|^\s*(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
         const isQuestion = questionRegex.test(rawUserMsgSafe);
 
         let explicitTemplateName = null;
@@ -284,8 +284,11 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     }
                 },
                 "fetchPage": async ({ title, wiki }) => {
-                    const targetWiki = (wiki && WIKIS[wiki]) ? WIKIS[wiki] : wikiConfigSafe;
-                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title} on ${targetWiki.name || 'default'}`);
+                    if (!wiki || !WIKIS[wiki]) {
+                        return { error: "Missing or invalid wiki. You MUST provide the 'wiki' parameter." };
+                    }
+                    const targetWiki = WIKIS[wiki];
+                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title} on ${targetWiki.name}`);
                     const canonical = await findCanonicalTitle(title, targetWiki);
                     if (!canonical) return { error: "Page not found" };
 
@@ -294,7 +297,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         title: canonical,
                         content: content,
                         articlePath: targetWiki.articlePath,
-                        wiki: (wiki && WIKIS[wiki]) ? wiki : targetWiki.key
+                        wiki: wiki
                     } : { error: "Unable to retrieve page content" };
                 }
             }

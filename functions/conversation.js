@@ -266,12 +266,13 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
 
                                 if (fnName === "searchWiki" && fnResult.results) {
                                     fnResult.results.forEach(r => {
-                                        if (typeof r === 'string') pendingTitles.add(r);
-                                        else if (r && r.title) pendingTitles.add(r.title);
+                                        const title = typeof r === 'string' ? r : r.title;
+                                        const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
+                                        if (title) pendingTitles.add(`${wiki}:${title}`);
                                     });
-                                } else if (fnName === "fetchPage" && fnArgs.title) {
+                                } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
                                     if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
-                                        pendingTitles.delete(fnArgs.title);
+                                        pendingTitles.delete(`${fnArgs.wiki}:${fnArgs.title}`);
                                     }
                                 }
 
