@@ -197,7 +197,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             if (options.forceSearch && hasCustomTools) {
                 initialToolConfig.functionCallingConfig = {
                     mode: "ANY",
-                    allowedFunctionNames: ["searchWiki"]
+                    allowedFunctionNames: ["searchWiki", "getContributionScores"]
                 };
             }
 
@@ -221,6 +221,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             const MAX_ITERATIONS = 10;
             
             let currentToolConfig = initialToolConfig;
+            let pendingTitles = new Set();
 
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
@@ -262,6 +263,16 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                         if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
+
+                                if (fnName === "searchWiki" && fnResult.results) {
+                                    fnResult.results.forEach(r => {
+                                        if (typeof r === 'string') pendingTitles.add(r);
+                                        else if (r && r.title) pendingTitles.add(r.title);
+                                    });
+                                } else if (fnName === "fetchPage" && fnArgs.title) {
+                                    pendingTitles.delete(fnArgs.title);
+                                }
+
                                 functionResponses.push(createResponse(fnResult));
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
@@ -275,28 +286,22 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     
                     currentMessageParts = functionResponses;
                     
-                    // After the first forced search, transition to requiring fetchPage if searchWiki was called
-                    if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY" &&
-                        currentToolConfig.functionCallingConfig?.allowedFunctionNames?.includes("searchWiki")) {
-
-                        currentToolConfig = {
-                            functionCallingConfig: {
-                                mode: "ANY",
-                                allowedFunctionNames: ["fetchPage"]
-                            }
-                        };
-                    } else if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY" &&
-                               currentToolConfig.functionCallingConfig?.allowedFunctionNames?.includes("fetchPage")) {
-
-                        // After fetchPage is used, we can eventually transition to AUTO
-                        // But since we want to ensure ALL results are fetched, we might stay in ANY:fetchPage
-                        // until the LLM decides it's done.
-                        // Actually, transitioning to AUTO here allows it to finish or call more.
-                        currentToolConfig = {
-                            functionCallingConfig: {
-                                mode: "AUTO"
-                            }
-                        };
+                    // Update tool configuration based on pending fetches
+                    if (currentToolConfig && currentToolConfig.functionCallingConfig?.mode === "ANY") {
+                        if (pendingTitles.size > 0) {
+                            currentToolConfig = {
+                                functionCallingConfig: {
+                                    mode: "ANY",
+                                    allowedFunctionNames: ["fetchPage"]
+                                }
+                            };
+                        } else {
+                            currentToolConfig = {
+                                functionCallingConfig: {
+                                    mode: "AUTO"
+                                }
+                            };
+                        }
                     }
 
                     continue; // Loop back to give Gemini the data

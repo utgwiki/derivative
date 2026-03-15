@@ -572,7 +572,7 @@ const searchWikiTool = {
 
 const fetchPageTool = {
     name: "fetchPage",
-    description: "Fetch the full markdown content of a specific wiki page. Use this when you have a specific page title from searchWiki or if the user mentions a specific page. This tool will also provide a list of images available on the page.",
+    description: "Fetch the full markdown content of a specific wiki page. Use this when you have a specific page title from searchWiki or if the user mentions a specific page. This tool will also provide a list of images available on the page and the articlePath to be used for citations.",
     parametersJsonSchema: {
         type: "object",
         properties: {

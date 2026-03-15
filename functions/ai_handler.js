@@ -160,7 +160,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const questionRegex = /\?|\b(?:how|what|who|where|when|why|is|are|does|did|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
+        const questionRegex = /\?|\b(?:how|what|who|where|when|why|which|is|are|does|did|do|can|will|should|has|have|could you|can you|explain|tell me|search|find)\b/i;
         const isQuestion = questionRegex.test(rawUserMsgSafe);
 
         let explicitTemplateName = null;
@@ -281,7 +281,12 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     if (!canonical) return { error: "Page not found" };
 
                     const content = await getWikiContent(canonical, targetWiki);
-                    return content ? { title: canonical, content: content } : { error: "Unable to retrieve page content" };
+                    return content ? {
+                        title: canonical,
+                        content: content,
+                        articlePath: targetWiki.articlePath,
+                        wiki: (wiki && WIKIS[wiki]) ? wiki : targetWiki.key
+                    } : { error: "Unable to retrieve page content" };
                 }
             }
         };
