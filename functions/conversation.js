@@ -296,8 +296,8 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive
-            if (finalResponse !== MESSAGES.aiServiceError && !isProactive) {
+            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive or history is disabled
+            if (finalResponse !== MESSAGES.aiServiceError && !isProactive && options.useHistory !== false) {
                 const username = message?.author?.username || "User";
                 persistConversationTurns(channelId,
                     { text: userInput, username, timestamp: currentTimestamp },

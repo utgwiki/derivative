@@ -208,9 +208,16 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             functions: {
                 "googleSearch": async ({ query }) => {
                     console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
+
+                    if (typeof query !== 'string' || query.trim().length === 0) {
+                        console.error(`[Tool] googleSearch invalid query:`, query);
+                        return { error: "Invalid search query provided." };
+                    }
+                    const sanitizedQuery = query.trim();
+
                     try {
                         const searchResult = await askGemini(
-                            `Search the web and provide a brief, factual answer to: ${query}`,
+                            `Search the web and provide a brief, factual answer to: ${sanitizedQuery}`,
                             [],
                             messageOrInteraction,
                             null,
