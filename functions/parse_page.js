@@ -662,6 +662,5 @@ module.exports = {
     getWikiContent,
     getFileUrls,
     knownPages,
-    knownPagesByWiki,
-    pageLookupByWiki
+    knownPagesByWiki
 };
