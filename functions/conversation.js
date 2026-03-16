@@ -235,6 +235,8 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
             let currentToolConfig = initialToolConfig;
             let pendingTitles = new Set();
             let searchAttempted = false;
+            let searchAttemptCount = 0;
+            const MAX_SEARCH_ATTEMPTS = 3;
 
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
@@ -278,6 +280,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                 const fnResult = await tools.functions[fnName](fnArgs);
 
                                 if (fnName === "searchWiki") {
+                                    searchAttemptCount++;
                                     if (fnResult && !fnResult.error && Array.isArray(fnResult.results)) {
                                         searchAttempted = true;
                                         fnResult.results.forEach(r => {
@@ -322,7 +325,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                 allowedFunctionNames: ["fetchPage"]
                             }
                         };
-                    } else if (!searchAttempted) {
+                    } else if (!searchAttempted && searchAttemptCount < MAX_SEARCH_ATTEMPTS) {
                         // If search not yet successfully done, keep forcing it
                         const allowed = ["searchWiki"];
                         if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
