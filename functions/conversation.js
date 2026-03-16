@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { MAIN_KEYS } = require("../geminikey.js"); 
 const { loadMemory, logMessage, logMessagesBatch, memory: persistedMemory } = require("../memory.js");
-const { performSearch, getWikiContent, findCanonicalTitle, knownPagesByWiki } = require("./parse_page.js");
+const { getWikiContent, findCanonicalTitle, knownPagesByWiki, performSearch } = require("./parse_page.js");
 const { getSystemInstruction, BOT_NAME, GEMINI_MODEL, WIKIS, CATEGORY_WIKI_MAP } = require("../config.js");
 
 const { fetch } = require("./utils.js");
@@ -118,6 +118,13 @@ function persistConversationTurns(channelId, userTurn, modelTurn) {
 }
 
 // --- GEMINI FUNCTIONS ---
+function normalizeToolKey(wiki, title) {
+    if (!wiki || !title) return null;
+    const normalizedWiki = wiki.toLowerCase().trim();
+    const normalizedTitle = title.toLowerCase().trim().replace(/_/g, ' ');
+    return `${normalizedWiki}:${normalizedTitle}`;
+}
+
 function extractText(result) {
     try {
         const candidate = result?.candidates?.[0];
@@ -187,7 +194,7 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
-// 💡 UPDATED: Now accepts 'isProactive' parameter
+// 💡 UPDATED: Now accepts 'wikiContent' and 'pageTitle' parameters
 async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null, tools = null, isProactive = false, options = {}) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
@@ -218,12 +225,35 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             // PREPARE TOOLS CONFIGURATION
             let geminiTools = [];
 
-            // If custom tools (like leaderboard) are passed, add their definitions
-            if (tools && tools.functionDeclarations && tools.functionDeclarations.length > 0) {
-                geminiTools.push({ functionDeclarations: tools.functionDeclarations });
-            } else {
-                // Fallback to Google Search if no custom tools are provided
-                geminiTools = [ {googleSearch: {}}, {urlContext: {}} ];
+            const toolObj = {};
+            const hasCustomTools = !!(tools && tools.functionDeclarations && tools.functionDeclarations.length > 0);
+
+            if (hasCustomTools) {
+                // Cannot combine custom tools with built-in tools in some Gemini versions/models
+                toolObj.functionDeclarations = tools.functionDeclarations;
+            } else if (options.useGoogleSearch) {
+                // Only add native Google Search if no custom tools are present and explicitly requested
+                toolObj.googleSearch = {};
+                // toolObj.urlContext = {}; // Optional: include if needed
+            }
+
+            if (Object.keys(toolObj).length > 0) {
+                geminiTools.push(toolObj);
+            }
+
+            let initialToolConfig = undefined;
+            if (options.forceSearch && hasCustomTools) {
+                const allowedFunctionNames = ["searchWiki", "checkWikiTitles"];
+                if (options.allowContributionScoresFirst) {
+                    allowedFunctionNames.push("getContributionScores");
+                }
+
+                initialToolConfig = {
+                    functionCallingConfig: {
+                        mode: "ANY",
+                        allowedFunctionNames: allowedFunctionNames
+                    }
+                };
             }
 
             const chat = gemini.chats.create({
@@ -231,9 +261,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 config: { 
                     systemInstruction: sysInstr,
                     tools: geminiTools.length > 0 ? geminiTools : undefined,
+                    toolConfig: initialToolConfig,
                     maxOutputTokens: 2500,
                 },
-                history: (options && options.useHistory === false) ? [] : chatHistories.get(channelId),
+                history: options.useHistory === false ? [] : chatHistories.get(channelId),
             });
 
             // Initial User Message
@@ -242,14 +273,25 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             
             let finalResponse = "";
             let iterations = 0;
-            const MAX_ITERATIONS = 5;
+            const MAX_ITERATIONS = 10;
             
+            let currentToolConfig = initialToolConfig;
+            let pendingTitles = new Set();
+            let searchAttempted = false;
+            let searchAttemptCount = 0;
+            const MAX_SEARCH_ATTEMPTS = 3;
+
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
 
                 // 1. Send message to Gemini
+                // 💡 FIX: Include tools in config to ensure declarations match toolConfig
                 const response = await chat.sendMessage({
-                    message: currentMessageParts
+                    message: currentMessageParts,
+                    config: {
+                        tools: geminiTools.length > 0 ? geminiTools : undefined,
+                        toolConfig: currentToolConfig
+                    }
                 });
 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
@@ -271,7 +313,11 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         const fnArgs = call.args;
                         const fnId = call.id; // Extracting ID
                         
-                        console.log(`[Tool] Gemini calling function: ${fnName}${fnId ? ` (ID: ${fnId})` : ''}`);
+                        if (fnId) {
+                            console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
+                        } else {
+                            console.log(`[Tool] Gemini calling function: ${fnName}`);
+                        }
 
                         const createResponse = (res) => {
                             const payload = { name: fnName, response: res };
@@ -282,6 +328,36 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
+
+                                if (fnName === "searchWiki" || fnName === "checkWikiTitles") {
+                                    searchAttemptCount++;
+                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results) && fnResult.results.length > 0) {
+                                        searchAttempted = true;
+                                        // Only add exact matches to pendingTitles to avoid fetching everything.
+                                        // For searchWiki, we don't auto-fetch anything anymore; let the AI decide.
+                                        // For checkWikiTitles, these are already exact matches.
+                                        if (fnName === "checkWikiTitles") {
+                                            fnResult.results.forEach(r => {
+                                                const title = typeof r === 'string' ? r : r.title;
+                                                const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
+                                                const key = normalizeToolKey(wiki, title);
+                                                if (key) pendingTitles.add(key);
+                                            });
+                                        }
+                                    }
+                                } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
+                                    const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
+                                    if (requestedKey) pendingTitles.delete(requestedKey);
+
+                                    if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
+                                        const canonicalTitle = fnResult.title || fnResult.page;
+                                        if (canonicalTitle) {
+                                            const canonicalKey = normalizeToolKey(fnArgs.wiki, canonicalTitle);
+                                            if (canonicalKey) pendingTitles.delete(canonicalKey);
+                                        }
+                                    }
+                                }
+
                                 functionResponses.push(createResponse(fnResult));
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
@@ -295,6 +371,38 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     
                     currentMessageParts = functionResponses;
                     
+                    // Update tool configuration based on pending fetches and mandatory search requirement
+                    if (!hasCustomTools) {
+                        currentToolConfig = undefined;
+                    } else if (pendingTitles.size > 0) {
+                        // If fetches pending, force fetchPage (even if search was done in the same turn)
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "ANY",
+                                allowedFunctionNames: ["fetchPage"]
+                            }
+                        };
+                    } else if (!searchAttempted && searchAttemptCount < MAX_SEARCH_ATTEMPTS) {
+                        // If search not yet successfully done, keep forcing it
+                        const allowed = ["searchWiki"];
+                        if (searchAttemptCount === 0) allowed.push("checkWikiTitles");
+                        if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
+
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "ANY",
+                                allowedFunctionNames: allowed
+                            }
+                        };
+                    } else {
+                        // Both search and any/all fetches complete (or no results found), transition to AUTO
+                        currentToolConfig = {
+                            functionCallingConfig: {
+                                mode: "AUTO"
+                            }
+                        };
+                    }
+
                     continue; // Loop back to give Gemini the data
                 }
 
@@ -302,13 +410,14 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 let text = "";
                 let textVal;
                 try {
+                    // 💡 Read .text once to avoid double evaluation if it's a getter
                     textVal = response.text;
                     text = textVal || "";
                 } catch (e) {
                     text = parts.filter(p => p.text).map(p => p.text).join("");
                 }
                 text = (text || "").trim();
-                
+
                 // 3. Handle Legacy MW_SEARCH / MW_CONTENT tags
                 const searchMatch = text.match(/\[MW_SEARCH:\s*(.*?)\]/i);
                 if (searchMatch) {
@@ -383,8 +492,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive
-            if (finalResponse !== MESSAGES.aiServiceError && !isProactive && (!options || options.useHistory !== false)) {
+            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive or history is disabled
+            if (finalResponse !== MESSAGES.aiServiceError && !isProactive && options.useHistory !== false) {
                 const username = message?.author?.username || "User";
                 persistConversationTurns(channelId,
                     { text: userInput, username, timestamp: currentTimestamp },
