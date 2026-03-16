@@ -436,6 +436,27 @@ async function getAllPages(wikiConfig) {
     return [...new Set(pages)];
 }
 
+function findMatches(text) {
+    if (!text) return [];
+    const results = [];
+    const lowerText = text.toLowerCase();
+
+    for (const [wikiKey, lookup] of pageLookupByWiki.entries()) {
+        for (const [lowerTitle, originalTitle] of lookup.entries()) {
+            if (lowerTitle.length < 3) continue; // Skip very short titles to avoid false positives
+
+            // Use word boundaries for matching
+            const escapedTitle = lowerTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedTitle}\\b`, 'i');
+
+            if (regex.test(lowerText)) {
+                results.push({ title: originalTitle, wiki: wikiKey });
+            }
+        }
+    }
+    return results;
+}
+
 async function loadPages() {
     try {
         knownPagesByWiki.clear();
@@ -605,10 +626,27 @@ const googleSearchTool = {
     }
 };
 
+const checkWikiTitlesTool = {
+    name: "checkWikiTitles",
+    description: "Check if the provided text contains any exact matches for wiki page titles. Useful for identifying specific topics to fetch.",
+    parametersJsonSchema: {
+        type: "object",
+        properties: {
+            text: {
+                type: "string",
+                description: "The text to check for wiki titles."
+            }
+        },
+        required: ["text"]
+    }
+};
+
 module.exports = { 
     searchWikiTool,
     fetchPageTool,
     googleSearchTool,
+    checkWikiTitlesTool,
+    findMatches,
     findCanonicalTitle, 
     getPageData,
     getSectionContent, 

@@ -10,6 +10,8 @@ const {
     searchWikiTool,
     fetchPageTool,
     googleSearchTool,
+    checkWikiTitlesTool,
+    findMatches,
     performSearch
 } = require("./parse_page.js");
 const {
@@ -203,9 +205,23 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
+        const matches = findMatches(rawUserMsgSafe);
+        let matchNote = "";
+        let shouldForceSearch = false;
+
+        if (matches.length > 0) {
+            shouldForceSearch = true;
+            matchNote = `\n[SYSTEM: The user's message matches the following wiki pages: ${matches.map(m => `${m.title} (${m.wiki})`).join(", ")}. Use searchWiki or fetchPage to explore these.]`;
+            promptMsg += matchNote;
+        }
+
         const tools = {
-            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool],
+            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool, checkWikiTitlesTool],
             functions: {
+                "checkWikiTitles": async ({ text }) => {
+                    const toolMatches = findMatches(text);
+                    return { results: toolMatches };
+                },
                 "googleSearch": async ({ query }) => {
                     console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
 
@@ -331,7 +347,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         tools,
                         isProactive,
                         {
-                            forceSearch: true,
+                            forceSearch: shouldForceSearch,
                             allowContributionScoresFirst: false
                         }
                     );
