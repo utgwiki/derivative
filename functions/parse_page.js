@@ -355,6 +355,7 @@ async function performSearch(query, wikiConfig) {
         action: "query",
         list: "search",
         srsearch: query,
+        srprop: "snippet",
         format: "json"
     });
 
@@ -364,7 +365,10 @@ async function performSearch(query, wikiConfig) {
     if (!res.ok) throw new Error(`Wiki API returned ${res.status}: ${res.statusText}`);
     const json = await res.json();
     const results = json.query?.search || [];
-    return results.map(r => r.title);
+    return results.map(r => ({
+        title: r.title,
+        snippet: r.snippet.replace(/<span class="searchmatch">/g, '').replace(/<\/span>/g, '')
+    }));
 }
 
 async function getAllNamespaces(wikiConfig) {
@@ -445,9 +449,9 @@ function findMatches(text) {
         for (const [lowerTitle, originalTitle] of lookup.entries()) {
             if (lowerTitle.length < 3) continue; // Skip very short titles to avoid false positives
 
-            // Use word boundaries for matching
+            // Use non-word anchors for matching to handle punctuation
             const escapedTitle = lowerTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`\\b${escapedTitle}\\b`, 'i');
+            const regex = new RegExp(`(?:^|\\W)${escapedTitle}(?:\\W|$)`, 'i');
 
             if (regex.test(lowerText)) {
                 results.push({ title: originalTitle, wiki: wikiKey });
@@ -647,6 +651,7 @@ module.exports = {
     googleSearchTool,
     checkWikiTitlesTool,
     findMatches,
+    pageLookupByWiki,
     findCanonicalTitle, 
     getPageData,
     getSectionContent, 

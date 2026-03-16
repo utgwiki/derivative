@@ -205,13 +205,13 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const matches = findMatches(rawUserMsgSafe);
+        const wikiMatches = findMatches(rawUserMsgSafe);
         let matchNote = "";
         let shouldForceSearch = false;
 
-        if (matches.length > 0) {
+        if (wikiMatches.length > 0) {
             shouldForceSearch = true;
-            matchNote = `\n[SYSTEM: The user's message matches the following wiki pages: ${matches.map(m => `${m.title} (${m.wiki})`).join(", ")}. Use searchWiki or fetchPage to explore these.]`;
+            matchNote = `\n[SYSTEM: The user's message matches the following wiki pages: ${wikiMatches.map(m => `${m.title} (${m.wiki})`).join(", ")}. Use searchWiki or fetchPage to explore these.]`;
             promptMsg += matchNote;
         }
 
@@ -304,8 +304,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         }
 
                         return {
-                            results: results.map(title => ({ title, wiki: sourceWiki })),
-                            instruction: `REQUIRED: You MUST now call \`fetchPage\` for EACH of the following titles (from the "${sourceWiki}" wiki) to get their content before responding. Ensure you pass the "wiki": "${sourceWiki}" parameter to each \`fetchPage\` call.`
+                            results: results.map(r => ({ title: r.title, snippet: r.snippet, wiki: sourceWiki }))
                         };
                     } catch (err) {
                         console.error(`[Tool] searchWiki failed:`, err);

@@ -290,14 +290,8 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
 
                                 if (fnName === "searchWiki" || fnName === "checkWikiTitles") {
                                     searchAttemptCount++;
-                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results)) {
+                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results) && fnResult.results.length > 0) {
                                         searchAttempted = true;
-                                        fnResult.results.forEach(r => {
-                                            const title = typeof r === 'string' ? r : r.title;
-                                            const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
-                                            const key = normalizeToolKey(wiki, title);
-                                            if (key) pendingTitles.add(key);
-                                        });
                                     }
                                 } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
                                     const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
