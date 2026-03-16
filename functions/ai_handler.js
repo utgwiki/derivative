@@ -256,15 +256,17 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 if (res.status === 'fulfilled' && res.value.content) {
                     const { key, title, content } = res.value;
                     const wikiName = WIKIS[key].name;
-                    pageTitles.push(`${title} (${wikiName})`);
 
                     if (wikiContent.length < MAX_CONTEXT_CHARS) {
                         const remainingBudget = MAX_CONTEXT_CHARS - wikiContent.length;
                         const pageLimit = Math.min(MAX_PER_PAGE_CHARS, remainingBudget);
                         const trimmedContent = content.slice(0, pageLimit);
-                        const articlePath = WIKIS[key].articlePath;
 
-                        wikiContent += `\n\n--- [Wiki: ${wikiName}] [ArticlePath: ${articlePath}] [Page: ${title}] ---\n${trimmedContent}`;
+                        if (trimmedContent.trim().length > 0) {
+                            const articlePath = WIKIS[key].articlePath;
+                            pageTitles.push(`${title} (${wikiName})`);
+                            wikiContent += `\n\n--- [Wiki: ${wikiName}] [ArticlePath: ${articlePath}] [Page: ${title}] ---\n${trimmedContent}`;
+                        }
                     }
                 }
             }
