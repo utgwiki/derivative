@@ -200,16 +200,18 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                 geminiTools.push(toolObj);
             }
 
-            const initialToolConfig = {};
+            let initialToolConfig = undefined;
             if (options.forceSearch && hasCustomTools) {
                 const allowedFunctionNames = ["searchWiki"];
                 if (options.allowContributionScoresFirst) {
                     allowedFunctionNames.push("getContributionScores");
                 }
 
-                initialToolConfig.functionCallingConfig = {
-                    mode: "ANY",
-                    allowedFunctionNames: allowedFunctionNames
+                initialToolConfig = {
+                    functionCallingConfig: {
+                        mode: "ANY",
+                        allowedFunctionNames: allowedFunctionNames
+                    }
                 };
             }
 
@@ -217,7 +219,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                 model: GEMINI_MODEL, 
                 config: { 
                     systemInstruction: sysInstr,
-                    tools: geminiTools, 
+                    tools: geminiTools.length > 0 ? geminiTools : undefined,
                     toolConfig: initialToolConfig,
                     maxOutputTokens: 2500,
                 },
@@ -242,10 +244,13 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                 iterations++;
 
                 // 1. Send message to Gemini
-                // 💡 FIX: Pass entire currentMessageParts to retain roles.
+                // 💡 FIX: Include tools in config to ensure declarations match toolConfig
                 const response = await chat.sendMessage({
                     message: currentMessageParts,
-                    config: { toolConfig: currentToolConfig }
+                    config: {
+                        tools: geminiTools.length > 0 ? geminiTools : undefined,
+                        toolConfig: currentToolConfig
+                    }
                 });
 
                 // 💡 CHECK FOR NATIVE FUNCTION CALLS
@@ -317,7 +322,9 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     currentMessageParts = functionResponses;
                     
                     // Update tool configuration based on pending fetches and mandatory search requirement
-                    if (pendingTitles.size > 0) {
+                    if (!hasCustomTools) {
+                        currentToolConfig = undefined;
+                    } else if (pendingTitles.size > 0) {
                         // If fetches pending, force fetchPage (even if search was done in the same turn)
                         currentToolConfig = {
                             functionCallingConfig: {
