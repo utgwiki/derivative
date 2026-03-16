@@ -355,6 +355,7 @@ async function performSearch(query, wikiConfig) {
         action: "query",
         list: "search",
         srsearch: query,
+        srprop: "snippet",
         format: "json"
     });
 
@@ -364,7 +365,10 @@ async function performSearch(query, wikiConfig) {
     if (!res.ok) throw new Error(`Wiki API returned ${res.status}: ${res.statusText}`);
     const json = await res.json();
     const results = json.query?.search || [];
-    return results.map(r => r.title);
+    return results.map(r => ({
+        title: r.title,
+        snippet: r.snippet.replace(/<span class="searchmatch">/g, '').replace(/<\/span>/g, '')
+    }));
 }
 
 async function getAllNamespaces(wikiConfig) {
@@ -434,6 +438,27 @@ async function getAllPages(wikiConfig) {
         console.error(`Error in getAllPages for ${wikiConfigSafe.name || wikiKey}:`, err.message);
     }
     return [...new Set(pages)];
+}
+
+function findMatches(text) {
+    if (!text) return [];
+    const results = [];
+    const lowerText = text.toLowerCase();
+
+    for (const [wikiKey, lookup] of pageLookupByWiki.entries()) {
+        for (const [lowerTitle, originalTitle] of lookup.entries()) {
+            if (lowerTitle.length < 3) continue; // Skip very short titles to avoid false positives
+
+            // Use non-word anchors for matching to handle punctuation
+            const escapedTitle = lowerTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(?:^|\\W)${escapedTitle}(?:\\W|$)`, 'i');
+
+            if (regex.test(lowerText)) {
+                results.push({ title: originalTitle, wiki: wikiKey });
+            }
+        }
+    }
+    return results;
 }
 
 async function loadPages() {
@@ -605,10 +630,28 @@ const googleSearchTool = {
     }
 };
 
+const checkWikiTitlesTool = {
+    name: "checkWikiTitles",
+    description: "Check if the provided text contains any exact matches for wiki page titles. Useful for identifying specific topics to fetch.",
+    parametersJsonSchema: {
+        type: "object",
+        properties: {
+            text: {
+                type: "string",
+                description: "The text to check for wiki titles."
+            }
+        },
+        required: ["text"]
+    }
+};
+
 module.exports = { 
     searchWikiTool,
     fetchPageTool,
     googleSearchTool,
+    checkWikiTitlesTool,
+    findMatches,
+    pageLookupByWiki,
     findCanonicalTitle, 
     getPageData,
     getSectionContent, 
@@ -619,6 +662,5 @@ module.exports = {
     getWikiContent,
     getFileUrls,
     knownPages,
-    knownPagesByWiki,
-    pageLookupByWiki
+    knownPagesByWiki
 };

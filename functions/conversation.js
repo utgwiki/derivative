@@ -202,7 +202,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
 
             let initialToolConfig = undefined;
             if (options.forceSearch && hasCustomTools) {
-                const allowedFunctionNames = ["searchWiki"];
+                const allowedFunctionNames = ["searchWiki", "checkWikiTitles"];
                 if (options.allowContributionScoresFirst) {
                     allowedFunctionNames.push("getContributionScores");
                 }
@@ -288,16 +288,21 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
 
-                                if (fnName === "searchWiki") {
+                                if (fnName === "searchWiki" || fnName === "checkWikiTitles") {
                                     searchAttemptCount++;
-                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results)) {
+                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results) && fnResult.results.length > 0) {
                                         searchAttempted = true;
-                                        fnResult.results.forEach(r => {
-                                            const title = typeof r === 'string' ? r : r.title;
-                                            const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
-                                            const key = normalizeToolKey(wiki, title);
-                                            if (key) pendingTitles.add(key);
-                                        });
+                                        // Only add exact matches to pendingTitles to avoid fetching everything.
+                                        // For searchWiki, we don't auto-fetch anything anymore; let the AI decide.
+                                        // For checkWikiTitles, these are already exact matches.
+                                        if (fnName === "checkWikiTitles") {
+                                            fnResult.results.forEach(r => {
+                                                const title = typeof r === 'string' ? r : r.title;
+                                                const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
+                                                const key = normalizeToolKey(wiki, title);
+                                                if (key) pendingTitles.add(key);
+                                            });
+                                        }
                                     }
                                 } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
                                     const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
@@ -339,6 +344,7 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                     } else if (!searchAttempted && searchAttemptCount < MAX_SEARCH_ATTEMPTS) {
                         // If search not yet successfully done, keep forcing it
                         const allowed = ["searchWiki"];
+                        if (searchAttemptCount === 0) allowed.push("checkWikiTitles");
                         if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
 
                         currentToolConfig = {

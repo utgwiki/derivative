@@ -10,6 +10,8 @@ const {
     searchWikiTool,
     fetchPageTool,
     googleSearchTool,
+    checkWikiTitlesTool,
+    findMatches,
     performSearch
 } = require("./parse_page.js");
 const {
@@ -203,9 +205,23 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
+        const wikiMatches = findMatches(rawUserMsgSafe);
+        let matchNote = "";
+        let shouldForceSearch = false;
+
+        if (wikiMatches.length > 0) {
+            shouldForceSearch = true;
+            matchNote = `\n[SYSTEM: The user's message matches the following wiki pages: ${wikiMatches.map(m => `${m.title} (${m.wiki})`).join(", ")}. Use searchWiki or fetchPage to explore these.]`;
+            promptMsg += matchNote;
+        }
+
         const tools = {
-            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool],
+            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool, checkWikiTitlesTool],
             functions: {
+                "checkWikiTitles": async ({ text }) => {
+                    const toolMatches = findMatches(text);
+                    return { results: toolMatches };
+                },
                 "googleSearch": async ({ query }) => {
                     console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
 
@@ -288,8 +304,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         }
 
                         return {
-                            results: results.map(title => ({ title, wiki: sourceWiki })),
-                            instruction: `REQUIRED: You MUST now call \`fetchPage\` for EACH of the following titles (from the "${sourceWiki}" wiki) to get their content before responding. Ensure you pass the "wiki": "${sourceWiki}" parameter to each \`fetchPage\` call.`
+                            results: results.map(r => ({ title: r.title, snippet: r.snippet, wiki: sourceWiki }))
                         };
                     } catch (err) {
                         console.error(`[Tool] searchWiki failed:`, err);
@@ -331,7 +346,7 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         tools,
                         isProactive,
                         {
-                            forceSearch: true,
+                            forceSearch: shouldForceSearch,
                             allowContributionScoresFirst: false
                         }
                     );
