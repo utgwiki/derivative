@@ -243,23 +243,75 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     if (result.error) return { error: result.error };
                     return { result: result.result };
                 },
-                "searchWiki": async ({ query }) => {
-                    console.log(`[Tool] searchWiki calling performSearch for: ${query}`);
+                "searchWiki": async ({ query, wiki }) => {
+                    if (!query || query.trim().length === 0) {
+                        throw new Error("No search query provided.");
+                    }
+                    let targetWikiKey = 'tagging';
+                    if (wiki) {
+                        if (WIKIS[wiki]) {
+                            targetWikiKey = wiki;
+                        } else {
+                            throw new Error(`Invalid wiki "${wiki}" provided. Valid options are: ${Object.keys(WIKIS).join(", ")}`);
+                        }
+                    } else if (wikiConfigSafe.key && WIKIS[wikiConfigSafe.key]) {
+                        targetWikiKey = wikiConfigSafe.key;
+                    } else if (wikiConfigSafe.baseUrl) {
+                        const matchedKey = Object.keys(WIKIS).find(k => WIKIS[k].baseUrl === wikiConfigSafe.baseUrl);
+                        if (matchedKey) targetWikiKey = matchedKey;
+                    }
+
+                    let targetWiki = WIKIS[targetWikiKey];
+
+                    console.log(`[Tool] searchWiki calling performSearch for: ${query} on ${targetWiki.name}`);
                     try {
-                        const results = await performSearch(query, wikiConfigSafe);
-                        return { results };
+                        let results = await performSearch(query, targetWiki);
+                        let sourceWiki = targetWikiKey;
+
+                        if (results.length === 0) {
+                            const wikiOrder = Object.keys(WIKIS);
+                            for (const fallbackKey of wikiOrder) {
+                                if (fallbackKey === targetWikiKey) continue;
+
+                                console.log(`[Tool] No results on ${sourceWiki}, trying ${fallbackKey}...`);
+                                try {
+                                    const otherResults = await performSearch(query, WIKIS[fallbackKey]);
+                                    if (otherResults.length > 0) {
+                                        results = otherResults;
+                                        sourceWiki = fallbackKey;
+                                        break;
+                                    }
+                                } catch (err) {
+                                    console.warn(`[Tool] searchWiki fallback to ${fallbackKey} failed:`, err.message);
+                                }
+                            }
+                        }
+
+                        return {
+                            results: results.map(title => ({ title, wiki: sourceWiki })),
+                            instruction: `REQUIRED: You MUST now call \`fetchPage\` for EACH of the following titles (from the "${sourceWiki}" wiki) to get their content before responding. Ensure you pass the "wiki": "${sourceWiki}" parameter to each \`fetchPage\` call.`
+                        };
                     } catch (err) {
                         console.error(`[Tool] searchWiki failed:`, err);
                         return { results: [], error: `Search failed: ${err.message}` };
                     }
                 },
-                "fetchPage": async ({ title }) => {
-                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title}`);
-                    const canonical = await findCanonicalTitle(title, wikiConfigSafe);
+                "fetchPage": async ({ title, wiki }) => {
+                    if (!wiki || !WIKIS[wiki]) {
+                        return { error: "Missing or invalid wiki. You MUST provide the 'wiki' parameter." };
+                    }
+                    const targetWiki = WIKIS[wiki];
+                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title} on ${targetWiki.name}`);
+                    const canonical = await findCanonicalTitle(title, targetWiki);
                     if (!canonical) return { error: "Page not found" };
 
-                    const content = await getWikiContent(canonical, wikiConfigSafe);
-                    return content ? { title: canonical, content: content } : { error: "Unable to retrieve page content" };
+                    const content = await getWikiContent(canonical, targetWiki);
+                    return content ? {
+                        title: canonical,
+                        content: content,
+                        articlePath: targetWiki.articlePath,
+                        wiki: wiki
+                    } : { error: "Unable to retrieve page content" };
                 }
             }
         };
@@ -277,7 +329,11 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                         imageParts,
                         messageOrInteraction,
                         tools,
-                        isProactive
+                        isProactive,
+                        {
+                            forceSearch: true,
+                            allowContributionScoresFirst: false
+                        }
                     );
                 } else {
                     reply = explicitTemplateContent || "I don't know.";
