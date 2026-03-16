@@ -141,16 +141,25 @@ function extractText(result) {
 
 // Page selection Gemini (uses GEMINI_PAGE_KEY)
 async function askGeminiForPages(userInput, wikiConfig) {
-    if (!wikiConfig) return [];
-    const gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
+    if (!wikiConfig || !process.env.GEMINI_PAGE_KEY) return [];
+
+    let gemini;
+    try {
+        gemini = await getGeminiClient(process.env.GEMINI_PAGE_KEY);
+    } catch (err) {
+        console.error("Failed to get Gemini client for page selection:", err.message);
+        return [];
+    }
 
     // Use wiki key directly from config
     const wikiKey = wikiConfig.key || "tagging";
     const wikiPages = knownPagesByWiki.get(wikiKey) || [];
+    const MAX_PAGES = 500;
+    const boundedPages = wikiPages.slice(0, MAX_PAGES);
 
     const prompt = `User asked: "${userInput}"
-From this wiki page list: ${wikiPages.join(", ")}
-Pick up to at least 5 relevant page titles that best match the request.
+From this wiki page list: ${boundedPages.join(", ")}
+Pick up to 5 relevant page titles that best match the request.
 Return only the exact page titles, one per line.
 If none are relevant, return "NONE".`;
 
@@ -231,10 +240,10 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             if (hasCustomTools) {
                 // Cannot combine custom tools with built-in tools in some Gemini versions/models
                 toolObj.functionDeclarations = tools.functionDeclarations;
-            } else if (options.useGoogleSearch) {
+            } else if (options.useGoogleSearch !== false) {
                 // Only add native Google Search if no custom tools are present and explicitly requested
                 toolObj.googleSearch = {};
-                // toolObj.urlContext = {}; // Optional: include if needed
+                toolObj.urlContext = {}; // Optional: include if needed
             }
 
             if (Object.keys(toolObj).length > 0) {
@@ -273,7 +282,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             
             let finalResponse = "";
             let iterations = 0;
-            const MAX_ITERATIONS = 10;
+            const MAX_ITERATIONS = 5;
             
             let currentToolConfig = initialToolConfig;
             let pendingTitles = new Set();

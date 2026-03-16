@@ -214,25 +214,51 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         } else {
             // Multi-wiki pre-retrieval
             const wikiKeys = Object.keys(WIKIS);
-            const selectionResults = await Promise.all(wikiKeys.map(async (key) => {
+            const settledSelection = await Promise.allSettled(wikiKeys.map(async (key) => {
                 const titles = await askGeminiForPages(rawUserMsgSafe, WIKIS[key]);
                 return { key, titles };
             }));
 
-            for (const { key, titles } of selectionResults) {
-                if (titles.length > 0) {
-                    const wikiTitleList = titles.map(t => `${t} (${WIKIS[key].name})`);
-                    pageTitles.push(...wikiTitleList);
+            const selectionResults = settledSelection.map((res, i) => {
+                const key = wikiKeys[i];
+                if (res.status === 'fulfilled') return res.value;
+                console.error(`Page selection failed for wiki ${key}:`, res.reason);
+                return { key, titles: [] };
+            });
 
-                    for (const title of titles) {
+            const MAX_CONTEXT_CHARS = 30000;
+            const MAX_PER_PAGE_CHARS = 7000;
+
+            const fetchPromises = [];
+            for (const { key, titles } of selectionResults) {
+                const wikiConfig = WIKIS[key];
+                for (const title of titles) {
+                    fetchPromises.push((async () => {
                         try {
-                            const content = await getWikiContent(title, WIKIS[key]);
-                            if (content) {
-                                wikiContent += `\n\n--- [Wiki: ${WIKIS[key].name}] Page: ${title} ---\n${content}`;
-                            }
+                            const content = await getWikiContent(title, wikiConfig);
+                            return { key, title, content };
                         } catch (err) {
-                            console.error(`Failed to fetch pre-loaded content for ${title} on ${key}:`, err.message);
+                            console.error(`Failed to fetch context for ${title} on ${key}:`, err.message);
+                            return { key, title, content: null };
                         }
+                    })());
+                }
+            }
+
+            const settledContent = await Promise.allSettled(fetchPromises);
+            for (const res of settledContent) {
+                if (res.status === 'fulfilled' && res.value.content) {
+                    const { key, title, content } = res.value;
+                    const wikiName = WIKIS[key].name;
+                    pageTitles.push(`${title} (${wikiName})`);
+
+                    if (wikiContent.length < MAX_CONTEXT_CHARS) {
+                        const remainingBudget = MAX_CONTEXT_CHARS - wikiContent.length;
+                        const pageLimit = Math.min(MAX_PER_PAGE_CHARS, remainingBudget);
+                        const trimmedContent = content.slice(0, pageLimit);
+                        const articlePath = WIKIS[key].articlePath;
+
+                        wikiContent += `\n\n--- [Wiki: ${wikiName}] [ArticlePath: ${articlePath}] [Page: ${title}] ---\n${trimmedContent}`;
                     }
                 }
             }
