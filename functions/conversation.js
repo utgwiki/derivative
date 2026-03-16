@@ -272,7 +272,11 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                         const fnArgs = call.args;
                         const fnId = call.id; // Extracting ID
                         
-                        console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
+                        if (fnId) {
+                            console.log(`[Tool] Gemini calling function: ${fnName} (ID: ${fnId})`);
+                        } else {
+                            console.log(`[Tool] Gemini calling function: ${fnName}`);
+                        }
 
                         const createResponse = (res) => {
                             const payload = { name: fnName, response: res };
@@ -296,10 +300,10 @@ async function askGemini(userInput, imageParts = [], message = null, tools = nul
                                         });
                                     }
                                 } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
-                                    if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
-                                        const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
-                                        if (requestedKey) pendingTitles.delete(requestedKey);
+                                    const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
+                                    if (requestedKey) pendingTitles.delete(requestedKey);
 
+                                    if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
                                         const canonicalTitle = fnResult.title || fnResult.page;
                                         if (canonicalTitle) {
                                             const canonicalKey = normalizeToolKey(fnArgs.wiki, canonicalTitle);

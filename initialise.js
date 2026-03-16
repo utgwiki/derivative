@@ -74,7 +74,7 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
     console.log(`Logged in as ${client.user.tag}`);
     const { loadPages } = require("./functions/parse_page.js");
     await loadPages();
