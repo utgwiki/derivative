@@ -143,7 +143,7 @@ async function askGeminiForPages(userInput, wikiConfig) {
 
     const prompt = `User asked: "${userInput}"
 From this wiki page list: ${wikiPages.join(", ")}
-Pick up to 5 relevant page titles that best match the request.
+Pick up to at least 5 relevant page titles that best match the request.
 Return only the exact page titles, one per line.
 If none are relevant, return "NONE".`;
 
@@ -187,7 +187,7 @@ async function runWithMainKeys(fn) {
     throw lastErr || new Error("All Gemini main keys failed!");
 }
 
-// 💡 UPDATED: Now accepts 'wikiContent' and 'pageTitle' parameters
+// 💡 UPDATED: Now accepts 'isProactive' parameter
 async function askGemini(userInput, wikiContent = null, pageTitle = null, imageParts = [], message = null, tools = null, isProactive = false, options = {}) {
     if (!userInput || !userInput.trim()) return MESSAGES.noAIResponse;
 
@@ -248,7 +248,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 iterations++;
 
                 // 1. Send message to Gemini
-                // 💡 FIX: Pass entire currentMessageParts to retain roles.
                 const response = await chat.sendMessage({
                     message: currentMessageParts
                 });
@@ -315,8 +314,23 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 if (searchMatch) {
                     const query = searchMatch[1].trim();
                     console.log(`[Tool] Searching for: ${query}`);
-                    const searchResults = await performSearch(query, wikiConfig);
-                    currentMessageParts = [{ text: `[SYSTEM] Search Results for "${query}": ${searchResults}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
+                    let results = await performSearch(query, wikiConfig);
+                    let wikiName = wikiConfig.name;
+
+                    if (results.length === 0) {
+                        for (const key in WIKIS) {
+                            if (WIKIS[key].baseUrl === wikiConfig.baseUrl) continue;
+                            const otherResults = await performSearch(query, WIKIS[key]);
+                            if (otherResults.length > 0) {
+                                results = otherResults;
+                                wikiName = WIKIS[key].name;
+                                break;
+                            }
+                        }
+                    }
+
+                    const resultStr = results.map(r => `- ${r.title} (Snippet: ${r.snippet})`).join("\n");
+                    currentMessageParts = [{ text: `[SYSTEM] Search Results from ${wikiName} for "${query}":\n${resultStr || "No results found."}\nNow please select a page using [MW_CONTENT: Title] or answer the user.` }];
                     continue;
                 }
 
@@ -324,11 +338,25 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                 if (contentMatch) {
                     const requestedTitle = contentMatch[1].trim();
                     console.log(`[Tool] Fetching content for: ${requestedTitle}`);
-                    const canonical = await findCanonicalTitle(requestedTitle, wikiConfig) || requestedTitle;
-                    const content = await getWikiContent(canonical, wikiConfig);
+
+                    let canonical = await findCanonicalTitle(requestedTitle, wikiConfig);
+                    let content = canonical ? await getWikiContent(canonical, wikiConfig) : null;
+                    let wikiName = wikiConfig.name;
+
+                    if (!content) {
+                        for (const key in WIKIS) {
+                            if (WIKIS[key].baseUrl === wikiConfig.baseUrl) continue;
+                            canonical = await findCanonicalTitle(requestedTitle, WIKIS[key]);
+                            content = canonical ? await getWikiContent(canonical, WIKIS[key]) : null;
+                            if (content) {
+                                wikiName = WIKIS[key].name;
+                                break;
+                            }
+                        }
+                    }
 
                     const resultText = content
-                        ? `[SYSTEM] Content for "${canonical}":\n${content.slice(0, 7000)}`
+                        ? `[SYSTEM] Content from ${wikiName} for "${canonical}":\n${content.slice(0, 7000)}`
                         : `[SYSTEM] Page not found.`;
 
                     currentMessageParts = [{ text: resultText }];
@@ -355,8 +383,8 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             if (!finalResponse) return MESSAGES.processingError;
 
-            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive or history is disabled
-            if (finalResponse !== MESSAGES.aiServiceError && !isProactive && (options && options.useHistory !== false)) {
+            // 💡 SYNC HISTORY: Persist turns together after success, UNLESS proactive
+            if (finalResponse !== MESSAGES.aiServiceError && !isProactive && (!options || options.useHistory !== false)) {
                 const username = message?.author?.username || "User";
                 persistConversationTurns(channelId,
                     { text: userInput, username, timestamp: currentTimestamp },

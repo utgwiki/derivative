@@ -6,13 +6,7 @@ const {
     getSectionContent,
     getLeadSection,
     getFullSizeImageUrl,
-    getFileUrls,
-    searchWikiTool,
-    fetchPageTool,
-    googleSearchTool,
-    checkWikiTitlesTool,
-    findMatches,
-    performSearch
+    getFileUrls
 } = require("./parse_page.js");
 const {
     askGemini,
@@ -206,75 +200,39 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        let allWikiContent = "";
-        const selectedTitlesByWiki = new Map();
+        let pageTitles = [];
+        let wikiContent = "";
 
-        // 1. Page Selection turn (concurrently for all wikis)
-        const wikiKeys = Object.keys(WIKIS);
-        const selectionPromises = wikiKeys.map(async (key) => {
-            const titles = await askGeminiForPages(rawUserMsgSafe, WIKIS[key]);
-            if (titles.length > 0) {
-                selectedTitlesByWiki.set(key, titles);
-            }
-        });
-        await Promise.all(selectionPromises);
+        if (skipGemini) {
+            if (explicitTemplateFoundTitle) pageTitles = [explicitTemplateFoundTitle];
+        } else {
+            // Multi-wiki support: fetch relevant titles for all wikis
+            const wikiKeys = Object.keys(WIKIS);
+            const selectionResults = await Promise.all(wikiKeys.map(async (key) => {
+                const titles = await askGeminiForPages(rawUserMsgSafe, WIKIS[key]);
+                return { key, titles };
+            }));
 
-        // 2. Fetch content for selected pages
-        for (const [wikiKey, titles] of selectedTitlesByWiki.entries()) {
-            const wikiConfig = WIKIS[wikiKey];
-            for (const title of titles) {
-                try {
-                    const content = await getWikiContent(title, wikiConfig);
-                    if (content) {
-                        allWikiContent += `\n\n[WIKI: ${wikiConfig.name}] [PAGE: ${title}]\n${content.slice(0, 5000)}\n`;
+            for (const { key, titles } of selectionResults) {
+                if (titles.length > 0) {
+                    pageTitles.push(...titles.map(t => `${t} (${WIKIS[key].name})`));
+                    for (const title of titles) {
+                        try {
+                            const content = await getWikiContent(title, WIKIS[key]);
+                            if (content) {
+                                wikiContent += `\n\n--- [Wiki: ${WIKIS[key].name}] Page: ${title} ---\n${content}`;
+                            }
+                        } catch (err) {
+                            console.error(`Failed to fetch content for ${title} on ${key}:`, err.message);
+                        }
                     }
-                } catch (err) {
-                    console.error(`Failed to fetch pre-loaded content for ${title} on ${wikiKey}:`, err.message);
                 }
             }
         }
 
         const tools = {
-            functionDeclarations: [contributionScoresTool, googleSearchTool, checkWikiTitlesTool],
+            functionDeclarations: [contributionScoresTool],
             functions: {
-                "checkWikiTitles": async ({ text }) => {
-                    const toolMatches = findMatches(text);
-                    return { results: toolMatches };
-                },
-                "googleSearch": async ({ query }) => {
-                    console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
-
-                    if (typeof query !== 'string' || query.trim().length === 0) {
-                        console.error(`[Tool] googleSearch invalid query:`, query);
-                        return { error: "Invalid search query provided." };
-                    }
-                    const sanitizedQuery = query.trim();
-
-                    try {
-                        const searchResult = await askGemini(
-                            `Search the web and provide a brief, factual answer to: ${sanitizedQuery}`,
-                            null, // wikiContent
-                            null, // pageTitle
-                            [],
-                            messageOrInteraction,
-                            null,
-                            true, // isProactive (prevents logging this sub-call to history)
-                            { useGoogleSearch: true, useHistory: false }
-                        );
-
-                        if (searchResult === MESSAGES.aiServiceError || searchResult === MESSAGES.processingError) {
-                            return { error: `Search sub-agent returned an error sentinel: ${searchResult}` };
-                        }
-                        if (searchResult && searchResult.error) {
-                            return { error: `Search sub-agent reported an error: ${searchResult.error}` };
-                        }
-
-                        return { result: searchResult };
-                    } catch (err) {
-                        console.error(`[Tool] googleSearch sub-agent failed:`, err);
-                        return { error: `Search failed: ${err.message}` };
-                    }
-                },
                 "getContributionScores": async () => {
                     const result = await getContributionScores(wikiConfigSafe);
                     if (result.error) return { error: result.error };
@@ -293,16 +251,13 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 if (!skipGemini) {
                     reply = await askGemini(
                         promptMsg,
-                        allWikiContent,
-                        null, // pageTitle
+                        wikiContent || undefined,
+                        pageTitles.join(", ") || undefined,
                         imageParts,
                         messageOrInteraction,
                         tools,
                         isProactive,
-                        {
-                            useGoogleSearch: true,
-                            allowContributionScoresFirst: false
-                        }
+                        { useGoogleSearch: true } // Sub-agent search enabled
                     );
                 } else {
                     reply = explicitTemplateContent || "I don't know.";
