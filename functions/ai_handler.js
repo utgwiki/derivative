@@ -235,8 +235,14 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 for (const title of titles) {
                     fetchPromises.push((async () => {
                         try {
-                            const content = await getWikiContent(title, wikiConfig);
-                            return { key, title, content };
+                            // Validate and canonicalize title before fetching
+                            const canonical = await findCanonicalTitle(title, wikiConfig);
+                            if (!canonical) {
+                                console.warn(`[Pre-retrieval] Title "${title}" not found on ${key}, skipping.`);
+                                return { key, title, content: null };
+                            }
+                            const content = await getWikiContent(canonical, wikiConfig);
+                            return { key, title: canonical, content };
                         } catch (err) {
                             console.error(`Failed to fetch context for ${title} on ${key}:`, err.message);
                             return { key, title, content: null };
