@@ -7,8 +7,6 @@ const {
     getLeadSection,
     getFullSizeImageUrl,
     getFileUrls,
-    searchWikiTool,
-    fetchPageTool,
     googleSearchTool,
     checkWikiTitlesTool,
     findMatches,
@@ -16,6 +14,7 @@ const {
 } = require("./parse_page.js");
 const {
     askGemini,
+    askGeminiForPages,
     MESSAGES
 } = require("./conversation.js");
 const { buildPageEmbed } = require("./embed_builder.js");
@@ -205,18 +204,76 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
             }
         }
 
-        const wikiMatches = findMatches(rawUserMsgSafe);
-        let matchNote = "";
-        let shouldForceSearch = false;
+        let pageTitles = [];
+        let wikiContent = "";
 
-        if (wikiMatches.length > 0) {
-            shouldForceSearch = true;
-            matchNote = `\n[SYSTEM: The user's message matches the following wiki pages: ${wikiMatches.map(m => `${m.title} (${m.wiki})`).join(", ")}. Use searchWiki or fetchPage to explore these.]`;
-            promptMsg += matchNote;
+        if (skipGemini) {
+            if (explicitTemplateFoundTitle) {
+                pageTitles = [explicitTemplateFoundTitle];
+            }
+        } else {
+            // Multi-wiki pre-retrieval
+            const wikiKeys = Object.keys(WIKIS);
+            const settledSelection = await Promise.allSettled(wikiKeys.map(async (key) => {
+                const titles = await askGeminiForPages(rawUserMsgSafe, WIKIS[key]);
+                return { key, titles };
+            }));
+
+            const selectionResults = settledSelection.map((res, i) => {
+                const key = wikiKeys[i];
+                if (res.status === 'fulfilled') return res.value;
+                console.error(`Page selection failed for wiki ${key}:`, res.reason);
+                return { key, titles: [] };
+            });
+
+            const MAX_CONTEXT_CHARS = 30000;
+            const MAX_PER_PAGE_CHARS = 7000;
+
+            const fetchPromises = [];
+            for (const { key, titles } of selectionResults) {
+                const wikiConfig = WIKIS[key];
+                for (const title of titles) {
+                    fetchPromises.push((async () => {
+                        try {
+                            // Validate and canonicalize title before fetching
+                            const canonical = await findCanonicalTitle(title, wikiConfig);
+                            if (!canonical) {
+                                console.warn(`[Pre-retrieval] Title "${title}" not found on ${key}, skipping.`);
+                                return { key, title, content: null };
+                            }
+                            const content = await getWikiContent(canonical, wikiConfig);
+                            return { key, title: canonical, content };
+                        } catch (err) {
+                            console.error(`Failed to fetch context for ${title} on ${key}:`, err.message);
+                            return { key, title, content: null };
+                        }
+                    })());
+                }
+            }
+
+            const settledContent = await Promise.allSettled(fetchPromises);
+            for (const res of settledContent) {
+                if (res.status === 'fulfilled' && res.value.content) {
+                    const { key, title, content } = res.value;
+                    const wikiName = WIKIS[key].name;
+
+                    if (wikiContent.length < MAX_CONTEXT_CHARS) {
+                        const remainingBudget = MAX_CONTEXT_CHARS - wikiContent.length;
+                        const pageLimit = Math.min(MAX_PER_PAGE_CHARS, remainingBudget);
+                        const trimmedContent = content.slice(0, pageLimit);
+
+                        if (trimmedContent.trim().length > 0) {
+                            const articlePath = WIKIS[key].articlePath;
+                            pageTitles.push(`${title} (${wikiName})`);
+                            wikiContent += `\n\n--- [Wiki: ${wikiName}] [ArticlePath: ${articlePath}] [Page: ${title}] ---\n${trimmedContent}`;
+                        }
+                    }
+                }
+            }
         }
 
         const tools = {
-            functionDeclarations: [contributionScoresTool, searchWikiTool, fetchPageTool, googleSearchTool, checkWikiTitlesTool],
+            functionDeclarations: [contributionScoresTool, googleSearchTool, checkWikiTitlesTool],
             functions: {
                 "checkWikiTitles": async ({ text }) => {
                     const toolMatches = findMatches(text);
@@ -234,6 +291,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     try {
                         const searchResult = await askGemini(
                             `Search the web and provide a brief, factual answer to: ${sanitizedQuery}`,
+                            null, // wikiContent
+                            null, // pageTitle
                             [],
                             messageOrInteraction,
                             null,
@@ -258,75 +317,6 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                     const result = await getContributionScores(wikiConfigSafe);
                     if (result.error) return { error: result.error };
                     return { result: result.result };
-                },
-                "searchWiki": async ({ query, wiki }) => {
-                    if (!query || query.trim().length === 0) {
-                        throw new Error("No search query provided.");
-                    }
-                    let targetWikiKey = 'tagging';
-                    if (wiki) {
-                        if (WIKIS[wiki]) {
-                            targetWikiKey = wiki;
-                        } else {
-                            throw new Error(`Invalid wiki "${wiki}" provided. Valid options are: ${Object.keys(WIKIS).join(", ")}`);
-                        }
-                    } else if (wikiConfigSafe.key && WIKIS[wikiConfigSafe.key]) {
-                        targetWikiKey = wikiConfigSafe.key;
-                    } else if (wikiConfigSafe.baseUrl) {
-                        const matchedKey = Object.keys(WIKIS).find(k => WIKIS[k].baseUrl === wikiConfigSafe.baseUrl);
-                        if (matchedKey) targetWikiKey = matchedKey;
-                    }
-
-                    let targetWiki = WIKIS[targetWikiKey];
-
-                    console.log(`[Tool] searchWiki calling performSearch for: ${query} on ${targetWiki.name}`);
-                    try {
-                        let results = await performSearch(query, targetWiki);
-                        let sourceWiki = targetWikiKey;
-
-                        if (results.length === 0) {
-                            const wikiOrder = Object.keys(WIKIS);
-                            for (const fallbackKey of wikiOrder) {
-                                if (fallbackKey === targetWikiKey) continue;
-
-                                console.log(`[Tool] No results on ${sourceWiki}, trying ${fallbackKey}...`);
-                                try {
-                                    const otherResults = await performSearch(query, WIKIS[fallbackKey]);
-                                    if (otherResults.length > 0) {
-                                        results = otherResults;
-                                        sourceWiki = fallbackKey;
-                                        break;
-                                    }
-                                } catch (err) {
-                                    console.warn(`[Tool] searchWiki fallback to ${fallbackKey} failed:`, err.message);
-                                }
-                            }
-                        }
-
-                        return {
-                            results: results.map(r => ({ title: r.title, snippet: r.snippet, wiki: sourceWiki }))
-                        };
-                    } catch (err) {
-                        console.error(`[Tool] searchWiki failed:`, err);
-                        return { results: [], error: `Search failed: ${err.message}` };
-                    }
-                },
-                "fetchPage": async ({ title, wiki }) => {
-                    if (!wiki || !WIKIS[wiki]) {
-                        return { error: "Missing or invalid wiki. You MUST provide the 'wiki' parameter." };
-                    }
-                    const targetWiki = WIKIS[wiki];
-                    console.log(`[Tool] fetchPage calling getWikiContent for: ${title} on ${targetWiki.name}`);
-                    const canonical = await findCanonicalTitle(title, targetWiki);
-                    if (!canonical) return { error: "Page not found" };
-
-                    const content = await getWikiContent(canonical, targetWiki);
-                    return content ? {
-                        title: canonical,
-                        content: content,
-                        articlePath: targetWiki.articlePath,
-                        wiki: wiki
-                    } : { error: "Unable to retrieve page content" };
                 }
             }
         };
@@ -341,14 +331,13 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
                 if (!skipGemini) {
                     reply = await askGemini(
                         promptMsg,
+                        wikiContent || undefined,
+                        pageTitles.join(", ") || undefined,
                         imageParts,
                         messageOrInteraction,
                         tools,
                         isProactive,
-                        {
-                            forceSearch: shouldForceSearch,
-                            allowContributionScoresFirst: false
-                        }
+                        { useGoogleSearch: true }
                     );
                 } else {
                     reply = explicitTemplateContent || "I don't know.";
