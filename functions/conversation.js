@@ -268,24 +268,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             }
 
             let initialToolConfig = undefined;
-            if (options.forceSearch && hasCustomTools) {
-                let allowedFunctionNames = ["searchWiki", "checkWikiTitles"];
-                if (options.allowContributionScoresFirst) {
-                    allowedFunctionNames.push("getContributionScores");
-                }
-
-                // Filter to only include declared and implemented functions
-                allowedFunctionNames = allowedFunctionNames.filter(name => callableFunctionNames.includes(name));
-
-                if (allowedFunctionNames.length > 0) {
-                    initialToolConfig = {
-                        functionCallingConfig: {
-                            mode: "ANY",
-                            allowedFunctionNames: allowedFunctionNames
-                        }
-                    };
-                }
-            }
 
             const chat = gemini.chats.create({
                 model: GEMINI_MODEL, 
@@ -307,10 +289,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
             const MAX_ITERATIONS = 5;
             
             let currentToolConfig = initialToolConfig;
-            let pendingTitles = new Set();
-            let searchAttempted = false;
-            let searchAttemptCount = 0;
-            const MAX_SEARCH_ATTEMPTS = 3;
 
             while (iterations < MAX_ITERATIONS) {
                 iterations++;
@@ -359,36 +337,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         if (tools?.functions?.[fnName]) {
                             try {
                                 const fnResult = await tools.functions[fnName](fnArgs);
-
-                                if (fnName === "searchWiki" || fnName === "checkWikiTitles") {
-                                    searchAttemptCount++;
-                                    if (fnResult && !fnResult.error && Array.isArray(fnResult.results) && fnResult.results.length > 0) {
-                                        searchAttempted = true;
-                                        // Only add exact matches to pendingTitles to avoid fetching everything.
-                                        // For searchWiki, we don't auto-fetch anything anymore; let the AI decide.
-                                        // For checkWikiTitles, these are already exact matches.
-                                        if (fnName === "checkWikiTitles") {
-                                            fnResult.results.forEach(r => {
-                                                const title = typeof r === 'string' ? r : r.title;
-                                                const wiki = typeof r === 'string' ? (fnResult.wiki || "tagging") : (r.wiki || fnResult.wiki || "tagging");
-                                                const key = normalizeToolKey(wiki, title);
-                                                if (key) pendingTitles.add(key);
-                                            });
-                                        }
-                                    }
-                                } else if (fnName === "fetchPage" && fnArgs.title && fnArgs.wiki) {
-                                    const requestedKey = normalizeToolKey(fnArgs.wiki, fnArgs.title);
-                                    if (requestedKey) pendingTitles.delete(requestedKey);
-
-                                    if (fnResult && !fnResult.error && (fnResult.content || fnResult.page || fnResult.title)) {
-                                        const canonicalTitle = fnResult.title || fnResult.page;
-                                        if (canonicalTitle) {
-                                            const canonicalKey = normalizeToolKey(fnArgs.wiki, canonicalTitle);
-                                            if (canonicalKey) pendingTitles.delete(canonicalKey);
-                                        }
-                                    }
-                                }
-
                                 functionResponses.push(createResponse(fnResult));
                             } catch (fnErr) {
                                 console.error(`Function ${fnName} failed:`, fnErr);
@@ -401,50 +349,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     }
                     
                     currentMessageParts = functionResponses;
-                    
-                    // Update tool configuration based on pending fetches and mandatory search requirement
-                    if (!hasCustomTools) {
-                        currentToolConfig = undefined;
-                    } else if (pendingTitles.size > 0 && callableFunctionNames.includes("fetchPage")) {
-                        // If fetches pending, force fetchPage (even if search was done in the same turn)
-                        currentToolConfig = {
-                            functionCallingConfig: {
-                                mode: "ANY",
-                                allowedFunctionNames: ["fetchPage"]
-                            }
-                        };
-                    } else if (!searchAttempted && searchAttemptCount < MAX_SEARCH_ATTEMPTS) {
-                        // If search not yet successfully done, keep forcing it
-                        let allowed = ["searchWiki"];
-                        if (searchAttemptCount === 0) allowed.push("checkWikiTitles");
-                        if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
-
-                        // Filter to only include declared and implemented functions
-                        allowed = allowed.filter(name => callableFunctionNames.includes(name));
-
-                        if (allowed.length > 0) {
-                            currentToolConfig = {
-                                functionCallingConfig: {
-                                    mode: "ANY",
-                                    allowedFunctionNames: allowed
-                                }
-                            };
-                        } else {
-                            currentToolConfig = {
-                                functionCallingConfig: {
-                                    mode: "AUTO"
-                                }
-                            };
-                        }
-                    } else {
-                        // Both search and any/all fetches complete (or no results found), transition to AUTO
-                        currentToolConfig = {
-                            functionCallingConfig: {
-                                mode: "AUTO"
-                            }
-                        };
-                    }
-
                     continue; // Loop back to give Gemini the data
                 }
 

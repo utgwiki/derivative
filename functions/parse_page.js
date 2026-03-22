@@ -575,46 +575,6 @@ async function getWikiContent(pageTitle, wikiConfig) {
     }
 }
 
-const searchWikiTool = {
-    name: "searchWiki",
-    description: "Search for pages on the wiki. Returns a list of matching page titles. Use this when you don't know the exact title or if there might be multiple relevant pages. If results are ambiguous, ask the user for clarification.",
-    parametersJsonSchema: {
-        type: "object",
-        properties: {
-            query: {
-                type: "string",
-                description: "The search query."
-            },
-            wiki: {
-                type: "string",
-                description: "The wiki to search on.",
-                enum: ["tagging", "farm"]
-            }
-        },
-        required: ["query"]
-    }
-};
-
-const fetchPageTool = {
-    name: "fetchPage",
-    description: "Fetch the full markdown content of a specific wiki page. Use this when you have a specific page title from searchWiki or if the user mentions a specific page. This tool will also provide a list of images available on the page and the articlePath to be used for citations.",
-    parametersJsonSchema: {
-        type: "object",
-        properties: {
-            title: {
-                type: "string",
-                description: "The exact title of the page to fetch."
-            },
-            wiki: {
-                type: "string",
-                description: "The wiki to fetch from.",
-                enum: ["tagging", "farm"]
-            }
-        },
-        required: ["title", "wiki"]
-    }
-};
-
 const googleSearchTool = {
     name: "googleSearch",
     description: "Search the web for information using Google. Use this for off-topic queries or when the wiki doesn't have the information you need. Keep answers brief and in character.",
@@ -630,26 +590,8 @@ const googleSearchTool = {
     }
 };
 
-const checkWikiTitlesTool = {
-    name: "checkWikiTitles",
-    description: "Check if the provided text contains any exact matches for wiki page titles. Useful for identifying specific topics to fetch.",
-    parametersJsonSchema: {
-        type: "object",
-        properties: {
-            text: {
-                type: "string",
-                description: "The text to check for wiki titles."
-            }
-        },
-        required: ["text"]
-    }
-};
-
 module.exports = { 
-    searchWikiTool,
-    fetchPageTool,
     googleSearchTool,
-    checkWikiTitlesTool,
     findMatches,
     pageLookupByWiki,
     findCanonicalTitle, 
