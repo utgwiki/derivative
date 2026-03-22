@@ -8,7 +8,6 @@ const {
     getFullSizeImageUrl,
     getFileUrls,
     googleSearchTool,
-    checkWikiTitlesTool,
     findMatches,
     performSearch
 } = require("./parse_page.js");
@@ -273,12 +272,8 @@ async function handleAIRequest(promptMsg, rawUserMsg, messageOrInteraction, wiki
         }
 
         const tools = {
-            functionDeclarations: [contributionScoresTool, googleSearchTool, checkWikiTitlesTool],
+            functionDeclarations: [contributionScoresTool, googleSearchTool],
             functions: {
-                "checkWikiTitles": async ({ text }) => {
-                    const toolMatches = findMatches(text);
-                    return { results: toolMatches };
-                },
                 "googleSearch": async ({ query }) => {
                     console.log(`[Tool] googleSearch calling sub-agent Gemini for: ${query}`);
 
