@@ -250,6 +250,9 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             const toolObj = {};
             const hasCustomTools = !!(tools && tools.functionDeclarations && tools.functionDeclarations.length > 0);
+            const declaredFunctionNames = hasCustomTools ? tools.functionDeclarations.map(d => d?.name).filter(Boolean) : [];
+            const executableFunctionNames = new Set(Object.keys(tools?.functions || {}));
+            const callableFunctionNames = declaredFunctionNames.filter(name => executableFunctionNames.has(name));
 
             if (hasCustomTools) {
                 // Cannot combine custom tools with built-in tools in some Gemini versions/models
@@ -266,17 +269,22 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 
             let initialToolConfig = undefined;
             if (options.forceSearch && hasCustomTools) {
-                const allowedFunctionNames = ["searchWiki", "checkWikiTitles"];
+                let allowedFunctionNames = ["searchWiki", "checkWikiTitles"];
                 if (options.allowContributionScoresFirst) {
                     allowedFunctionNames.push("getContributionScores");
                 }
 
-                initialToolConfig = {
-                    functionCallingConfig: {
-                        mode: "ANY",
-                        allowedFunctionNames: allowedFunctionNames
-                    }
-                };
+                // Filter to only include declared and implemented functions
+                allowedFunctionNames = allowedFunctionNames.filter(name => callableFunctionNames.includes(name));
+
+                if (allowedFunctionNames.length > 0) {
+                    initialToolConfig = {
+                        functionCallingConfig: {
+                            mode: "ANY",
+                            allowedFunctionNames: allowedFunctionNames
+                        }
+                    };
+                }
             }
 
             const chat = gemini.chats.create({
@@ -397,7 +405,7 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                     // Update tool configuration based on pending fetches and mandatory search requirement
                     if (!hasCustomTools) {
                         currentToolConfig = undefined;
-                    } else if (pendingTitles.size > 0) {
+                    } else if (pendingTitles.size > 0 && callableFunctionNames.includes("fetchPage")) {
                         // If fetches pending, force fetchPage (even if search was done in the same turn)
                         currentToolConfig = {
                             functionCallingConfig: {
@@ -407,16 +415,27 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
                         };
                     } else if (!searchAttempted && searchAttemptCount < MAX_SEARCH_ATTEMPTS) {
                         // If search not yet successfully done, keep forcing it
-                        const allowed = ["searchWiki"];
+                        let allowed = ["searchWiki"];
                         if (searchAttemptCount === 0) allowed.push("checkWikiTitles");
                         if (options.allowContributionScoresFirst) allowed.push("getContributionScores");
 
-                        currentToolConfig = {
-                            functionCallingConfig: {
-                                mode: "ANY",
-                                allowedFunctionNames: allowed
-                            }
-                        };
+                        // Filter to only include declared and implemented functions
+                        allowed = allowed.filter(name => callableFunctionNames.includes(name));
+
+                        if (allowed.length > 0) {
+                            currentToolConfig = {
+                                functionCallingConfig: {
+                                    mode: "ANY",
+                                    allowedFunctionNames: allowed
+                                }
+                            };
+                        } else {
+                            currentToolConfig = {
+                                functionCallingConfig: {
+                                    mode: "AUTO"
+                                }
+                            };
+                        }
                     } else {
                         // Both search and any/all fetches complete (or no results found), transition to AUTO
                         currentToolConfig = {
